@@ -30,7 +30,7 @@ Documents to update: `dev-journal.md`, `decision-log.md`.
 
 ## B1: Requirements, architecture, and tool selection
 
-Status: open.
+Status: done.
 
 Scope: close the open points O1 to O4 in `concept.md`. Revise the
 requirements against the case. Fix the assumptions A1 to A9 with their values
