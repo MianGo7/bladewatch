@@ -1,0 +1,39 @@
+@startuml reading-to-alert-sequence
+!include _style.puml
+
+title Path of one reading from the sensor to the alert
+
+participant "Sensor simulator\nand producer" as producer
+participant "Kafka topic\nmachine-temperature" as tempTopic
+participant "Stream processor" as processor
+database "TimescaleDB" as db
+participant "Kafka topic\nmachine-alerts" as alertTopic
+participant "Grafana" as grafana
+actor "Shift operator" as operator
+
+producer -> tempTopic : reading (machine_id, sequence,\nmeasured_at, temperature_c)
+note right of tempTopic : Broker appends the record\nand sets the log append time.
+tempTopic -> processor : poll
+processor -> processor : check thresholds and\nrate of rise, update the\nstate of the alert
+
+note over processor, db : The processor writes readings in batches.\nThe sequence shows one reading for clarity.
+alt a transition of the alert state occurs
+  processor -> db : insert reading and alert\nin one transaction
+  note right of db : Idempotent: primary key\n(machine_id, measured_at).\nThe database sets stored_at.
+  db --> processor : committed
+  processor -> alertTopic : publish alert (alert_id, severity, status)
+else no transition
+  processor -> db : insert reading
+  db --> processor : committed
+end
+
+processor -> tempTopic : commit offset
+note right of processor : Offset is committed only after\nthe database transaction.\nA crash before it causes a redelivery\nthat the primary key absorbs.
+
+loop at each refresh of the dashboard
+  grafana -> db : SQL query for\nreadings and open alerts
+  db --> grafana : rows
+end
+grafana -> operator : dashboard shows the alert,\ncontact point sends the notification
+
+@enduml

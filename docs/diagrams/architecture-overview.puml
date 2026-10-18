@@ -1,0 +1,63 @@
+@startuml architecture-overview
+!include _style.puml
+
+title Architecture of the temperature monitoring at RotorWind GmbH
+
+package "Data collection" {
+  component "Sensor simulator\nand Kafka producer" as producer <<prototype>>
+  component "Edge gateway\n(MQTT or OPC UA)" as gateway <<target only>>
+}
+
+package "Message queuing\nApache Kafka" {
+  queue "machine-temperature" as tempTopic <<topic>>
+  queue "machine-alerts" as alertTopic <<topic>>
+}
+
+package "Stream processing" {
+  component "Python stream processor\n(rules, state of alerts)" as processor <<prototype>>
+}
+
+package "Hot storage\nTimescaleDB" {
+  database "readings\n(hypertable)" as readings
+  database "alerts" as alerts
+  database "readings_hourly\n(continuous aggregate)" as hourly
+}
+
+package "Data access" {
+  component "Grafana\n(dashboard, alert rule,\ncontact point)" as grafana <<prototype>>
+}
+
+package "Archive" {
+  component "Archive writer" as archiver <<target only>>
+  database "Object storage\n(columnar files)" as archive <<target only>>
+}
+
+package "Existing reporting" {
+  component "Data warehouse\n(weekly load, BI)" as dwh <<existing>>
+}
+
+actor "Shift operator" as operator
+
+gateway ..> tempTopic : publishes
+producer --> tempTopic : publishes readings\nkey: machine_id
+tempTopic --> processor : consumer group
+processor --> readings : insert, idempotent
+processor --> alerts : upsert by alert_id
+processor --> alertTopic : publishes alerts\nkey: machine_id
+readings --> hourly : aggregates
+readings --> grafana : SQL
+alerts --> grafana : SQL
+hourly --> grafana : SQL
+grafana --> operator : dashboard and\nnotification
+alertTopic ..> archiver : second consumer group
+tempTopic ..> archiver : second consumer group
+archiver ..> archive : writes once
+hourly --> dwh : view for the\nweekly load
+
+note bottom of archive
+  Components marked target only, and the dashed arrows
+  that lead to them, belong to the target architecture
+  and are not built in the prototype.
+end note
+
+@enduml

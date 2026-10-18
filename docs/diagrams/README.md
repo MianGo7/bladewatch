@@ -10,8 +10,8 @@ from `compose.yaml`.
 
 | File | Diagram | Item | Status |
 | --- | --- | --- | --- |
-| `architecture-overview.puml` | Component diagram of the target architecture with its layers, the chosen tools, and the existing data warehouse | B1 | open |
-| `reading-to-alert-sequence.puml` | Sequence of one reading from the sensor through the broker and the processor to the database, the alert, and the dashboard | B1 | open |
+| `architecture-overview.puml` | Component diagram of the target architecture with its layers, the chosen tools, and the existing data warehouse | B1 | done |
+| `reading-to-alert-sequence.puml` | Sequence of one reading from the sensor through the broker and the processor to the database, the alert, and the dashboard | B1 | done |
 | `alert-states.puml` | State diagram of the alert of one machine | B4 | open |
 | `package-components.puml` | Component diagram of the Python package, with the imports between modules and libraries | B9 | open |
 | `deployment.puml` | Deployment diagram of the containers, their ports, volumes, and topics | B9 | open |
