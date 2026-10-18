@@ -11,7 +11,7 @@ Status values: open, in progress, done.
 
 ## B0: Repository and project set up
 
-Status: open.
+Status: done.
 
 Scope: create the Python project with uv and locked dependencies, with pytest
 and Ruff as the only dependencies at this stage, configure the static checks,
