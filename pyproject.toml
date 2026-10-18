@@ -1,0 +1,56 @@
+[project]
+name = "bladewatch"
+version = "0.1.0"
+description = "Prototype of a real-time temperature monitoring architecture for production machines."
+readme = "README.md"
+authors = [
+  { name = "Mian Gohar Ehsan" },
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  "ruff==0.17.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+  "integration: needs the running Docker Compose stack",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # import order
+  "B",   # bugbear
+  "UP",  # modern syntax
+  "N",   # naming
+  "D",   # docstrings
+  "ANN", # type hints
+  "T20", # print calls
+  "NPY", # NumPy legacy random state
+  "ICN", # import conventions
+  "RET", # early returns
+  "SIM", # simplifications
+  "ERA", # commented out code
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
