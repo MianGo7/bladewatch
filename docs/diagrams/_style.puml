@@ -1,0 +1,9 @@
+' Shared style for every diagram. Black on white, because the case study is
+' printed and the figures must stay legible without colour.
+skinparam monochrome true
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+hide empty members

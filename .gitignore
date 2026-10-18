@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Editors and operating system
+.idea/
+.vscode/
+.DS_Store
+
+# Local environment overrides for Docker Compose
+.env
+
+# Raw output of measurement runs. It is reproducible from the measurement
+# definitions, so only the figures and summary tables that the case study
+# refers to are versioned, in docs/figures.
+/results/
+
+# Rendered diagrams, generated from the PlantUML sources in docs/diagrams.
+/docs/diagrams/out/
