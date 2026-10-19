@@ -46,12 +46,15 @@ development defaults that protect nothing beyond the machine they run on.
 | TimescaleDB | 2.30.2 on PostgreSQL 17 | Timescale License for compression and continuous aggregates, free for self-hosted internal use |
 | Grafana | 13.2.4 | GNU Affero General Public License 3 |
 | Python | 3.13 | Python Software Foundation License |
+| confluent-kafka | 2.16.0 | Apache License 2.0 |
+| NumPy | 2.5.4 | BSD 3-Clause, with permissive licences for parts of the distribution |
+| psycopg | 3.3.6 | GNU Lesser General Public License 3.0 |
 | pytest | 9.1.1 | MIT |
 | Ruff | 0.17.1 | MIT |
 
 The licences of the three services were read in the pinned images and, for
 TimescaleDB, in the licence file of the version in its repository. The licences
-of pytest and Ruff are taken from their package metadata. The reasoning is in
+of the Python packages are taken from their package metadata. The reasoning is in
 ADR-0013 of `docs/decision-log.md`.
 
 ## Prerequisites
@@ -68,6 +71,7 @@ with Compose.
     uv run ruff check                         # static checks
     uv run python -m bladewatch --help        # the entry points
     uv run python -m bladewatch produce --duration-s 60   # publish readings for a minute
+    uv run python -m bladewatch process       # consume, apply the rules, store
 
 The tests marked `integration` need the running container stack and are run
 with `uv run pytest -m integration`. Continuous integration runs the format

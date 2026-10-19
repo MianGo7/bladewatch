@@ -184,6 +184,20 @@ values, the oscillation around both levels, a deterministic series checked
 against an independent least squares fit, normal operation for two hours per
 machine type with noise, and the redelivery of readings.
 
+B5, the stream processor and the storage. The module `storage`, which is the only
+one that imports the database driver, with one transaction per batch, idempotent
+inserts, and the queries that a restart needs. The module `processor`, which
+consumes in batches, applies the rules, publishes the alerts, writes the database
+transaction, and commits the offsets. The alert message in `messages`, the method
+`restore` and the open alert in `rules`, the settings of the database and the
+processor in `config`, and the command `python -m bladewatch process`. The unit
+tests are 17 for the processor with fake collaborators, and 13 integration tests
+for the storage and 6 for the processor, which run against isolated topics, a
+consumer group, and machine identifiers of their own and remove them afterwards.
+The command was also run once for real with the producer: 60 readings arrived and
+were stored exactly once, no alert was raised in normal operation, and the process
+stopped cleanly on an interrupt.
+
 **Decisions.** ADR-0013 to ADR-0015 span both days. ADR-0016 selects
 confluent-kafka as the client library, with `kafka-python` and `aiokafka` as the
 rejected alternatives and the expectation about the load generator named as an
@@ -206,6 +220,14 @@ degrees Celsius (A14), a window of 60 seconds with a limit of 3 degrees Celsius
 per minute (A15), and an overheating of 5 degrees Celsius per minute for the
 demonstration (A16). The sources are the heating rates of Lux et al. (2020, p.
 405) and the sliding windows of Akidau et al. (2015, p. 1794).
+
+ADR-0019 selects psycopg 3 with a statement that unnests arrays for one round trip
+per batch, and sets `stored_at` with `clock_timestamp()` instead of `now()`, so
+that the delay of a batch is visible. ADR-0020 fixes the order of processing,
+the restoration of the rules from the database, the handling of messages that are
+not valid, and the single consumer. The batch size of 500 and the wait of 0.2
+seconds are the new assumption A17. FR7 and NFR8 are marked done, and NFR2 is
+partly met until measurement M3 has run under load in B8.
 
 **Problems.** `uv add` wrote the new dependencies with a lower bound, which the
 requirement of exact pins does not allow, and they were pinned with a second
@@ -235,6 +257,33 @@ ADR names the imprecision. The slope is recomputed from all 61 readings of the
 window per reading, which is simple and correct but may be a visible share of the
 processing time in M2.
 
+The most important finding of B5 was a flaw in an earlier decision. ADR-0012 stated
+that alerts are published after the database commit. Working through a stop between
+the commit and the publication showed that the restarted rules restore the open alert
+from the database, ignore the redelivered readings as already seen, and never publish
+the event, so the alert would be stored and lost for the consumers of the topic.
+ADR-0020 therefore supersedes that order: the alerts are published before the
+commit, which can repeat an event after a failed write and is covered by the at least
+once semantics, and the integration tests cover both failure cases. The old ADR is
+marked as partly superseded and was not rewritten.
+
+All six integration tests of the processor passed on their first run, which was
+treated as a reason for doubt and not as a result. Two deliberate defects were put
+into the processor to see whether the tests notice them. Without the restoration at
+start the restart test failed, and with the offsets committed before the database
+write the unit tests and the test of the failed write failed; the processor was
+restored byte for byte afterwards. A first draft of the processor converted stored
+text into values of an enumeration with inline imports and a lint suppression, which
+was replaced by ordinary imports before anything ran, and the first helper of the
+processor tests mixed up which fake owned the journal of calls and was rewritten.
+`uv add` was first given a version of psycopg that was a guess, 3.3.5, and the
+current release 3.3.6 was pinned instead. The table of tools and licences in the
+README had no rows for confluent-kafka and NumPy since B3, and they were added with
+psycopg. The real run of the command and the integration tests left rows, a topic
+with readings, and thirteen empty consumer groups behind; the rows and the topic were
+deleted and recreated, the groups were removed, and the tests now delete every
+consumer group that they create.
+
 **Observation.** The default partitioner of the client does not spread the
 twelve machine identifiers evenly over six partitions. With the seed of the
 check and a topic of six partitions the machines landed as follows: partition 0
@@ -258,8 +307,16 @@ fill first and the warning follows after 60 seconds at 75 degrees Celsius. These
 are properties of the rules for a deterministic series and not measurements of
 the system.
 
-**Next.** B5, the stream processor and the storage, with the choice of the
-PostgreSQL driver and its record. The state of the trackers has to be restored
-after a restart from the stored readings of the last window and the open alerts,
-and the storage has to write the alert events with the key of ADR-0014. The
-continuous integration run on GitHub is still outstanding.
+**Observation (B5).** In the real run, the 60 stored readings show a difference of
+0.055 to 0.559 seconds between the time of measurement and the time of storage. This
+is a single observation of a run that started the processor four seconds before the
+producer, and it is not a measurement; the latency is measured in B8 with the load
+profile, the hardware, and the Docker limits recorded.
+
+**Next.** B6, the dashboard and the alerting: a Grafana dashboard provisioned from a
+file, with the current temperature of every machine and its thresholds, a time series
+per machine type, the table of open and recent alerts, and the history of a machine from
+the continuous aggregate, and a Grafana alert rule with a contact point (A6). The
+thresholds are not in the database yet, and the dashboard needs them, so a table or a
+view of the machines and their thresholds has to be decided there. The continuous
+integration run on GitHub is still outstanding.

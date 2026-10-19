@@ -115,7 +115,7 @@ Documents to update: `requirements.md`, `diagrams/README.md`,
 
 ## B5: Stream processor and storage
 
-Status: open.
+Status: done.
 
 Scope: the processor that consumes `machine-temperature` in a consumer group,
 applies the rules, writes readings in batches to TimescaleDB, writes alerts

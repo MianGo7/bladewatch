@@ -389,7 +389,7 @@ version 1.
 
 ## ADR-0012: At-least-once delivery with idempotent storage
 
-Date: 2026-10-18. Status: accepted.
+Date: 2026-10-18. Status: accepted; the order of publishing the alerts is superseded by ADR-0020.
 
 **Context.** NFR2 requires that no reading is lost and none is stored twice
 when the processor is stopped and restarted. Isah et al. (2019, p. 154306) name
@@ -709,3 +709,102 @@ processor stops. It is restored in B5 by replaying the readings of the last
 window from the database, which the rule of ignoring old readings makes safe, and
 by reading the open alerts. The model has no timeout for a sensor that falls
 silent while an alert is open, which is a limit of the prototype.
+
+## ADR-0019: psycopg 3 and one transaction per batch in the storage module
+
+Date: 2026-10-19. Status: accepted.
+
+**Context.** The processor of B5 writes readings and alert events to TimescaleDB
+in batches, and a batch has to be stored completely or not at all, because the
+offsets are committed after it (ADR-0012). The driver may only be imported by
+`storage`, so that the other modules run without a database.
+
+**Decision.** `storage` uses `psycopg` 3.3.6 with its binary package, both pinned
+to the exact version and published under the GNU Lesser General Public License
+3.0 according to their package metadata. A batch is one transaction. The readings
+are written with one statement that unnests arrays of the columns, so that a batch
+needs one round trip, and `ON CONFLICT (machine_id, measured_at) DO NOTHING`
+makes the insert idempotent and counts the readings that were new. The alert
+events are written one by one with `ON CONFLICT (alert_id, severity, status) DO
+NOTHING`, because they are rare. The column `stored_at` is set with
+`clock_timestamp()`, the time at which the statement runs, and not with `now()`,
+which is the start of the transaction, so that a batch that waited for a slow
+insert shows its delay. Errors of the driver are reported as `StorageError`, so
+that no other module imports the exception classes of the driver. The module also
+reads what a restart needs: the latest readings of a machine and the open alerts.
+
+**Alternatives.** `psycopg2`, the older driver, was rejected because psycopg 3
+offers server side parameter binding, a context manager for transactions, and
+typed adaptation of lists to arrays, which the statement with `unnest` relies on.
+`asyncpg` was rejected because the consumer loop is sequential and synchronous, and
+an event loop would add complexity without gain at the scale of the case. A
+statement with one set of parameters per reading in `executemany` was rejected
+because it needs a round trip or a pipeline per row, whereas `unnest` is a single
+statement. The `COPY` protocol is the fastest way to load rows but has no
+`ON CONFLICT` clause, so that a redelivered reading would raise an error instead of
+being ignored.
+
+**Consequences.** The licence of the driver is a copyleft licence for the library,
+which permits its use as a dependency without a duty for the code of the project,
+and NFR3 stays satisfied as free of charge. The statement ties the number of
+columns to the arrays in its parameters, so that a new column needs a change in
+both. The value of `stored_at` is the time of the insert and not of the commit, so
+that the time between the two is not part of the measured latency; it is short for
+a single transaction.
+
+## ADR-0020: Processing order, state restoration, and single consumer
+
+Date: 2026-10-19. Status: accepted. Supersedes the order of publishing the alerts
+in ADR-0012.
+
+**Context.** The processor has to lose no reading and store none twice when it is
+stopped or fails at any point (NFR2). It keeps state that the database does not
+hold, the rate window and the open alert of each machine (ADR-0018), and it has to
+publish each alert event to Kafka. ADR-0012 stated that alerts are published after
+the database commit.
+
+**Decision.** A batch is processed in this order: the rules evaluate the readings,
+the alerts are published and flushed, the database transaction of readings and alert
+events is committed, and the offsets are committed. A failure at any step before the
+last leaves the offsets uncommitted, so that the batch is delivered again, and the
+processor stops and does not continue with state that has run ahead of the database.
+On start, the processor rebuilds the state of every machine from the database: it
+reads the stored readings of two window lengths and one reading interval, which fill
+the rate window and the time of the last rise above the limit, and the open alert,
+which fixes the state and the identifier. A reading that is not newer than the last
+one is ignored by the rules, so that the readings that Kafka delivers again after a
+restart change neither the state nor the events. A message that is not valid JSON,
+violates the format, names an unknown machine, or has no broker timestamp is logged
+and skipped, and its offset is committed with the batch. The consumer has no
+automatic commit and starts at the beginning of the retained log for a new group.
+One consumer instance runs per group.
+
+**Alternatives.** Publishing the alerts after the database commit, as ADR-0012
+stated, was rejected after the failure case was worked through. If the processor
+stops between the commit and the publication, the restarted rules restore the open
+alert from the database, ignore the redelivered readings as already seen, and never
+publish the event, so that the alert would be stored but lost for every consumer of
+the topic. Publishing before the commit has the opposite failure, a repeated message:
+if the database write fails after the publication, the batch is evaluated again and
+the same event, with the same alert identifier, is published a second time. At least
+once is the stated semantics of ADR-0012, and a consumer recognises the repeat by the
+identifier and the severity. A transactional outbox, which stores the events and lets
+a separate process publish them, would give an exactly once effect on the topic but
+needs a column for the state of publication and a second process, which is more
+machinery than the prototype shows. Kafka transactions across the topics were
+rejected for the reason given in ADR-0012. Skipping a message that is not valid
+instead of stopping was chosen because a single malformed message would otherwise
+block the partition; a dead letter topic would keep the message and is not built.
+
+**Consequences.** The topic of the alerts may contain a repeated event after a
+failure of the database write, and the integration test of that case asserts the set
+of events and not their number. A reading that was skipped is lost for the
+processing, and the count of rejected messages is logged per batch and not stored,
+which is a limit. The restoration reads two windows of readings per machine from the
+database at each start, which is cheap at twelve machines and grows with the number of
+machines. Scaling by a second consumer in the group is not supported, because the
+state of a machine that moves to another consumer would have to be restored on
+assignment; the measurement M2 therefore uses one process. The processor stops on any
+database error and relies on a supervisor to restart it, which Docker Compose would
+provide in a deployment and the prototype does not configure.
+
