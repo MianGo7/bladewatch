@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 PACKAGE = Path(__file__).parents[1] / "src" / "bladewatch"
-PURE_MODULES = ["config", "sensor", "messages"]
+PURE_MODULES = ["config", "sensor", "rules", "messages"]
 # Libraries that the pure modules must not import, so that they run in a plain
 # unit test without Docker (NFR7).
 FORBIDDEN = {"confluent_kafka", "psycopg", "psycopg2", "matplotlib"}
