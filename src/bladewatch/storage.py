@@ -1,0 +1,305 @@
+"""Database access of the prototype.
+
+The only module that imports the database driver. It writes readings and alert
+events idempotently in one transaction per batch (ADR-0012) and reads back what a
+restarted processor needs to rebuild the state of its rules (ADR-0020).
+Implements FR7 and NFR8.
+"""
+
+import logging
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from types import TracebackType
+from typing import Self
+
+import psycopg
+from psycopg.conninfo import make_conninfo
+
+from bladewatch.config import DatabaseSettings
+
+logger = logging.getLogger(__name__)
+
+# stored_at is the time at which the statement runs and not the start of the
+# transaction, which now() would give, so that it shows the delay of a batch
+# that waited for a slow insert (ADR-0019).
+_INSERT_READINGS = """
+INSERT INTO readings (
+    machine_id, sequence, measured_at, temperature_c,
+    kafka_appended_at, processed_at, stored_at
+)
+SELECT m, s, t, c, k, p, clock_timestamp()
+FROM unnest(
+    %s::text[], %s::bigint[], %s::timestamptz[], %s::float8[],
+    %s::timestamptz[], %s::timestamptz[]
+) AS u(m, s, t, c, k, p)
+ON CONFLICT (machine_id, measured_at) DO NOTHING
+"""
+
+_INSERT_ALERT = """
+INSERT INTO alerts (
+    alert_id, machine_id, kind, severity, status, temperature_c, "limit",
+    measured_at, processed_at, stored_at
+)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, clock_timestamp())
+ON CONFLICT (alert_id, severity, status) DO NOTHING
+"""
+
+_RECENT_READINGS = """
+SELECT measured_at, temperature_c
+FROM readings
+WHERE machine_id = %(machine_id)s
+  AND measured_at >= (
+      SELECT max(measured_at) FROM readings WHERE machine_id = %(machine_id)s
+  ) - make_interval(secs => %(span_s)s)
+ORDER BY measured_at
+"""
+
+# An alert is open when it has no closing event. Its latest event carries the
+# kind and the severity that the tracker of the rules has to take over.
+_OPEN_ALERTS = """
+SELECT DISTINCT ON (a.alert_id) a.alert_id, a.machine_id, a.kind, a.severity
+FROM alerts AS a
+WHERE NOT EXISTS (
+    SELECT 1 FROM alerts AS c WHERE c.alert_id = a.alert_id AND c.status = 'closed'
+)
+ORDER BY a.alert_id, a.measured_at DESC
+"""
+
+
+class StorageError(RuntimeError):
+    """The database did not accept a batch or a query."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReadingRow:
+    """A reading as it is stored, without the time of storage.
+
+    Attributes:
+        machine_id: Identifier of the machine.
+        sequence: Counter per machine.
+        measured_at: Time of measurement, set by the sensor.
+        temperature_c: Temperature in degrees Celsius.
+        kafka_appended_at: Time at which the broker appended the record.
+        processed_at: Time at which the processor evaluated the reading.
+    """
+
+    machine_id: str
+    sequence: int
+    measured_at: datetime
+    temperature_c: float
+    kafka_appended_at: datetime
+    processed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AlertRow:
+    """An alert event as it is stored, without the time of storage.
+
+    Attributes:
+        alert_id: Identifier of the alert.
+        machine_id: Identifier of the machine.
+        kind: `threshold` or `rate_of_rise`.
+        severity: `warning` or `critical`.
+        status: `raised` or `closed`.
+        temperature_c: Temperature of the reading that caused the event.
+        limit: Threshold in degrees Celsius or rate limit in degrees Celsius per
+            minute.
+        measured_at: Time of measurement of that reading.
+        processed_at: Time at which the processor evaluated it.
+    """
+
+    alert_id: str
+    machine_id: str
+    kind: str
+    severity: str
+    status: str
+    temperature_c: float
+    limit: float
+    measured_at: datetime
+    processed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class OpenAlertRow:
+    """An alert without a closing event.
+
+    Attributes:
+        alert_id: Identifier of the alert.
+        machine_id: Identifier of the machine.
+        kind: Kind of the latest event of the alert.
+        severity: Severity of the latest event of the alert.
+    """
+
+    alert_id: str
+    machine_id: str
+    kind: str
+    severity: str
+
+
+@dataclass(frozen=True, slots=True)
+class BatchResult:
+    """The outcome of storing a batch.
+
+    Attributes:
+        readings_inserted: Readings that were new.
+        readings_ignored: Readings that were already stored.
+        alerts_inserted: Alert events that were new.
+        alerts_ignored: Alert events that were already stored.
+    """
+
+    readings_inserted: int
+    readings_ignored: int
+    alerts_inserted: int
+    alerts_ignored: int
+
+
+class Storage:
+    """A connection to TimescaleDB with the operations of the prototype."""
+
+    def __init__(self, settings: DatabaseSettings) -> None:
+        """Creates a storage; the connection opens with `connect`.
+
+        Args:
+            settings: The connection to the database.
+        """
+        self._conninfo = make_conninfo(
+            host=settings.host,
+            port=settings.port,
+            dbname=settings.dbname,
+            user=settings.user,
+            password=settings.password,
+        )
+        self._connection: psycopg.Connection | None = None
+
+    def connect(self) -> None:
+        """Opens the connection.
+
+        Raises:
+            StorageError: If the database is not reachable.
+        """
+        try:
+            self._connection = psycopg.connect(self._conninfo)
+        except psycopg.Error as error:
+            raise StorageError(f"cannot connect to the database: {error}") from error
+
+    def close(self) -> None:
+        """Closes the connection, if it is open."""
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+
+    def __enter__(self) -> Self:
+        """Opens the connection for use in a with statement."""
+        self.connect()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Closes the connection."""
+        self.close()
+
+    def store_batch(
+        self, readings: Sequence[ReadingRow], alerts: Sequence[AlertRow]
+    ) -> BatchResult:
+        """Stores readings and alert events in one transaction.
+
+        A reading or an event that is already stored is ignored, which makes the
+        call safe to repeat after a redelivery.
+
+        Args:
+            readings: The readings of the batch.
+            alerts: The alert events that the readings caused.
+
+        Raises:
+            StorageError: If the transaction fails. Nothing of the batch is
+                stored then.
+        """
+        connection = self._require_connection()
+        try:
+            with connection.transaction(), connection.cursor() as cursor:
+                readings_inserted = 0
+                if readings:
+                    cursor.execute(
+                        _INSERT_READINGS,
+                        [
+                            [r.machine_id for r in readings],
+                            [r.sequence for r in readings],
+                            [r.measured_at for r in readings],
+                            [r.temperature_c for r in readings],
+                            [r.kafka_appended_at for r in readings],
+                            [r.processed_at for r in readings],
+                        ],
+                    )
+                    readings_inserted = cursor.rowcount
+                alerts_inserted = 0
+                for alert in alerts:
+                    cursor.execute(
+                        _INSERT_ALERT,
+                        (
+                            alert.alert_id,
+                            alert.machine_id,
+                            alert.kind,
+                            alert.severity,
+                            alert.status,
+                            alert.temperature_c,
+                            alert.limit,
+                            alert.measured_at,
+                            alert.processed_at,
+                        ),
+                    )
+                    alerts_inserted += cursor.rowcount
+        except psycopg.Error as error:
+            raise StorageError(f"the batch was not stored: {error}") from error
+        return BatchResult(
+            readings_inserted=readings_inserted,
+            readings_ignored=len(readings) - readings_inserted,
+            alerts_inserted=alerts_inserted,
+            alerts_ignored=len(alerts) - alerts_inserted,
+        )
+
+    def recent_readings(
+        self, machine_id: str, span_s: float
+    ) -> list[tuple[datetime, float]]:
+        """Returns the latest stored readings of a machine in ascending order.
+
+        Args:
+            machine_id: Identifier of the machine.
+            span_s: Length of the time span in seconds that ends at the latest
+                stored reading of the machine.
+        """
+        connection = self._require_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    _RECENT_READINGS, {"machine_id": machine_id, "span_s": span_s}
+                )
+                rows = cursor.fetchall()
+            connection.commit()
+        except psycopg.Error as error:
+            raise StorageError(f"readings could not be read: {error}") from error
+        return [(measured_at, temperature_c) for measured_at, temperature_c in rows]
+
+    def open_alerts(self) -> dict[str, OpenAlertRow]:
+        """Returns the open alert of every machine that has one, by machine."""
+        connection = self._require_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(_OPEN_ALERTS)
+                rows = cursor.fetchall()
+            connection.commit()
+        except psycopg.Error as error:
+            raise StorageError(f"open alerts could not be read: {error}") from error
+        latest: dict[str, OpenAlertRow] = {}
+        for alert_id, machine_id, kind, severity in rows:
+            latest[machine_id] = OpenAlertRow(alert_id, machine_id, kind, severity)
+        return latest
+
+    def _require_connection(self) -> psycopg.Connection:
+        if self._connection is None:
+            raise StorageError("the storage is not connected")
+        return self._connection
