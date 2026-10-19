@@ -554,3 +554,86 @@ the `image:` lines is sufficient for the check.
 a client in the test process, about 7 seconds for 12 tests. They depend on the
 container and service names of `compose.yaml`. The tests of B5 and B8 use the
 client libraries and may replace parts of these.
+
+## ADR-0016: confluent-kafka as the Kafka client library
+
+Date: 2026-10-19. Status: accepted.
+
+**Context.** The producer of B3 and the processor of B5 need a Kafka client for
+Python. The delivery semantics of ADR-0012 require acknowledgement by all
+in-sync replicas and an idempotent producer, and the scalability measurement M2
+offers up to 100,000 readings per second from a single producer process.
+
+**Decision.** The producer uses `confluent-kafka` 2.16.0, which binds the C
+library librdkafka and is distributed under the Apache License 2.0. The
+configuration is `acks=all` and `enable.idempotence=true`, and the producer
+address family is fixed to IPv4, because `localhost` resolves to the IPv6
+address first and the stack listens on IPv4 only, which logged a refused
+connection for every client. The batching and linger settings stay at the
+defaults of the library, because changing them belongs to the measurements and
+must not be done to improve a result. The package is pinned to the exact
+version in `pyproject.toml` (NFR5). The processor of B5 uses the same library
+unless a measurement or a defect argues against it, and a change is recorded
+in a new ADR.
+
+**Alternatives.** `kafka-python` 3.0.11 is a pure Python client and was
+published on 2026-08-16, so it is maintained. It was rejected because a client
+in C is expected to carry the highest steps of M2 with less CPU time in the
+producer process, so that the limit that M2 finds is the limit of the broker and
+the database and not of the load generator. This is an expectation and not a
+measurement, and it is the first thing to revisit if the producer turns out to
+be the bottleneck. `aiokafka` 0.14.0 is built on `asyncio`. It was rejected
+because the paced producer loop and the consumer loop of the processor are
+sequential, and an event loop would add complexity without a gain at the scale
+of the case. The version of `kafka-python-ng`, a fork, was last published on
+2024-10-02 and was not considered further.
+
+**Consequences.** The library ships a binary wheel for the platforms of the
+developer machine and the continuous integration runner, and a source build would
+need librdkafka. The test double of the producer has to follow the signature of
+the real `produce` call, which the protocol class in `producer.py` documents.
+The partitioner of the library decides which partition a machine identifier
+lands on, which matters for the parallelism of consumers (A10).
+
+## ADR-0017: Sensor model with a constant setpoint, white noise, and NumPy
+
+Date: 2026-10-19. Status: accepted.
+
+**Context.** The sensors are simulated, and the simulation has to be
+reproducible (FR11), testable against analytic values (NFR7), and able to inject
+an overheating (FR3, FR5). The values of the model must not claim more than the
+sources support.
+
+**Decision.** A sensor reports the normal temperature of its machine type plus
+independent Gaussian noise per reading, with the standard deviation of
+assumption A13. An injected overheating adds a rise that is linear in time from
+a start time on and has no upper bound. Every sensor draws from a
+`numpy.random.Generator` that is passed in. The generators of a simulation are
+spawned from one seed with `SeedSequence`, one per machine, so that the readings
+of a machine do not change when another machine is added or overheats, and a run
+is identical for a seed. NumPy 2.5.4 is added as a dependency, pinned to the
+exact version; the architecture of the project names it as the source of random
+numbers for the sensor module, and its licence expression in the package
+metadata consists of permissive licences. The Kafka client is the only
+dependency that the backlog item names, so NumPy is recorded here.
+
+**Alternatives.** An autocorrelated process, for instance a first order
+autoregressive process around the setpoint, resembles a real temperature
+better, but it needs a correlation parameter for which no source exists, and
+the analytic mean and spread of the unit tests would depend on it. Noise on a
+slowly varying thermal model of the machine was rejected for the same reason. The
+Python standard library `random` module was rejected because a project rule
+forbids it and because a global state would couple the machines. A single
+generator for the whole plant was rejected, because the draws of one machine
+would then depend on the order and the number of the other machines. An
+overheating with a ceiling or a cool-down phase was left out, because the
+scenario of B7 ends before a ceiling would matter and an unused parameter
+would not be tested by the course of the run.
+
+**Consequences.** The normal operation has no daily rhythm or warm-up phase,
+which is a simplification that the case study states as a limit. The unit tests
+of the mean and the spread use 100,000 samples and tolerances of five standard
+errors, derived in the comments of the tests, and a different seed would pass
+with a probability above 99.9999 percent. The rate of an injected overheating is
+a parameter of the scenario and is fixed in B7, together with the rate limit of
+the rule in B4.

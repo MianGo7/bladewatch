@@ -73,7 +73,7 @@ Documents to update: `requirements.md`, `decision-log.md`, `dev-journal.md`,
 
 ## B3: Sensor simulator and producer
 
-Status: open.
+Status: done.
 
 Scope: the configuration of the machines as frozen dataclasses, the
 temperature model of a machine with normal operation, noise, and an

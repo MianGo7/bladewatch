@@ -161,8 +161,58 @@ version of the documents were finished on the evening of 2026-10-18, as recorded
 in that entry. This day was used to go through the documents of B2 once more and
 to commit the work in separate commits.
 
-**Decisions.** None beyond ADR-0013 to ADR-0015, which span both days.
+B3, the sensor simulator and the producer. The modules `config` (frozen
+settings of the plant of A1 to A4 with validation), `sensor` (a constant
+setpoint with Gaussian noise and a linear overheating, one seeded generator per
+machine), `messages` (the reading with its schema version, validation, and JSON
+serialisation), `producer` (a pure generator of readings per tick and a publisher
+for Kafka with acknowledgement by all and idempotence), and `cli`
+(`python -m bladewatch produce`). The tests were written before each module: 24
+for the configuration, 19 for the sensor, 25 for the messages, 17 for the
+producer, 3 for the command line, and 4 for the module boundaries, and 5
+integration tests that publish to a temporary topic and read it back with a new
+consumer group.
 
-**Problems.** None recorded for this day.
+**Decisions.** ADR-0013 to ADR-0015 span both days. ADR-0016 selects
+confluent-kafka as the client library, with `kafka-python` and `aiokafka` as the
+rejected alternatives and the expectation about the load generator named as an
+expectation and not as a measurement. ADR-0017 fixes the sensor model: no
+autocorrelation, because no source supports a correlation parameter, and an
+overheating without a ceiling. NumPy was added as a dependency that the backlog
+item does not name, because the architecture of the project makes it the source
+of random numbers for the sensor; the ADR says so. The measurement noise is the
+new assumption A13 with a value of 0.5 degrees Celsius and no source. FR1 and FR2
+are marked done, and NFR7 is partly met until the rules exist in B4.
 
-**Next.** B3, the sensor simulator and the producer.
+**Problems.** `uv add` wrote the new dependencies with a lower bound, which the
+requirement of exact pins does not allow, and they were pinned with a second
+call before anything else was built. Ruff reported the name
+`UnsupportedSchemaVersion` of an exception, and the class was renamed to end in
+`Error`, instead of disabling the rule. Every connection of the first producer
+run logged a refused attempt on the IPv6 address, because `localhost` resolves to
+`::1` first and the stack listens on IPv4 only; fixing the address family of the
+client removed the noise. The first version of the integration test published and
+read the topic once per test and took 25 seconds, which module scoped fixtures
+reduced to 10. To check the command line against the real topic, the producer was
+run for three seconds against `machine-temperature`. This left 36 readings in the
+topic that the processor of B5 would have read, so the topic was deleted and
+recreated by the job `kafka-init`, and the stack is in the state it had before. A
+test run against the real topic is not repeated for that reason.
+
+**Observation.** The default partitioner of the client does not spread the
+twelve machine identifiers evenly over six partitions. With the seed of the
+check and a topic of six partitions the machines landed as follows: partition 0
+held `grinder-01` and `grinder-03`, partition 1 held `grinder-04`, `mould-02`,
+`mould-03`, `oven-01`, `oven-02`, and `oven-03`, partition 2 held `oven-04`,
+partition 4 held `grinder-02` and `mould-04`, partition 5 held `mould-01`, and
+partition 3 held none. The result depends on the identifiers and on the
+partitioner of the client and not on the hardware or the seed. At the load of the
+case a consumer group therefore has work for at most five consumers, and one
+consumer of the group would carry half of the machines. This is recorded in A10
+and is a point for the discussion of the limits of scaling by partitions, because
+a Java client with a different partitioner would place the same keys differently.
+
+**Next.** B4, the alert rules. The margin for closing an alert, the window and
+limit of the rate of rise, and the rate of the injected overheating are decided
+there and in B7; the rate limit is to be derived from the heating rates of Lux et
+al. (2020, p. 405) and is a point to settle with the author.

@@ -66,6 +66,8 @@ with Compose.
     uv run pytest -m "not integration"        # unit tests, no Docker needed
     uv run ruff format --check                # code style
     uv run ruff check                         # static checks
+    uv run python -m bladewatch --help        # the entry points
+    uv run python -m bladewatch produce --duration-s 60   # publish readings for a minute
 
 The tests marked `integration` need the running container stack and are run
 with `uv run pytest -m integration`. Continuous integration runs the format
