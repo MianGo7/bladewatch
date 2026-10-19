@@ -95,7 +95,7 @@ Documents to update: `requirements.md`, `concept.md` (A1 to A4 if refined),
 
 ## B4: Alert rules
 
-Status: open.
+Status: done.
 
 Scope: the alert rules as pure functions and data: warning and critical
 thresholds per machine type, hysteresis so that an alert does not flap around

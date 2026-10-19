@@ -164,6 +164,9 @@ are fixed in B1 and a later change is recorded in `decision-log.md`.
 | A11 | Retention of the Kafka topics | Seven days for both topics | Assumption. The retention has to outlast an outage of the processor over a weekend with margin, and it matches the weekly rhythm of the existing DWH. At the highest steps of A9 the volume of seven days is not bounded by this value, so the topics are recreated between the steps of M2 |
 | A12 | Chunking, compression, and retention of the readings in TimescaleDB | Chunk interval of one day, compression of chunks older than seven days, deletion of raw readings older than 90 days, refresh of the hourly aggregate every 15 minutes over a window from three days to one hour before now | Assumption. At the 12 readings per second of the case a one day chunk holds about one million rows, and at the 2,000 readings per second of A9 about 173 million rows, which is still a manageable chunk. Recent chunks stay uncompressed for the dashboard and for late rows. Ninety days bound the hot storage while the hourly aggregates, which are kept without limit in the prototype, and the archive of the target architecture hold the longer history. The refresh window has to start well inside the retention, so that no bucket is recomputed from dropped chunks |
 | A13 | Standard deviation of the measurement noise of a sensor | 0.5 degrees Celsius, independent per reading and normally distributed | Assumption. No source gives the noise of a sensor on such a machine. The value is small against the smallest margin of 10 degrees Celsius between the normal and the warning temperature of a type, which is 20 standard deviations, so that normal operation does not raise an alert by chance, and it is large enough to show as noise on the dashboard. The tests of the rules in B4 use series of their own around a threshold and do not depend on this value (ADR-0017) |
+| A14 | Margin by which the temperature has to fall before an alert closes | 2.0 degrees Celsius below the warning threshold | Assumption. The margin is four standard deviations of the sensor noise of A13, so that noise alone does not reopen or flap an alert, and it is far below the gap of 10 to 15 degrees Celsius between the normal and the warning temperature of every machine type, so that a machine that returns to normal always closes its alert. The alert of a mould closes below 78, of an oven below 108, and of a grinding machine below 58 degrees Celsius (ADR-0018) |
+| A15 | Window and limit of the rate of rise check | Sliding window of 60 seconds, least squares slope over its readings, limit of 3 degrees Celsius per minute, check silent until the window is full | Assumption. The limit is twice the highest heating rate of 1.5 degrees Celsius per minute in the published cycles (Lux et al., 2020, p. 405). With the noise of A13 the standard error of the slope over 60 readings is 0.22 degrees Celsius per minute, so that the limit lies 6.7 standard errors above the highest normal heating rate. Sliding windows are described by Akidau et al. (2015, p. 1794). A rate alert additionally closes only after the rate has stayed below the limit for a full window (ADR-0018) |
+| A16 | Rate of the overheating in the demonstration scenario | 5 degrees Celsius per minute | Assumption, chosen for the demonstration. The rate lies above the limit of 3 degrees Celsius per minute of A15, so that the rate of rise warning is raised before the warning threshold is reached. For a mould that starts at 70 degrees Celsius, the warning threshold of 80 is crossed after 120 seconds and the critical threshold of 95 after 300 seconds |
 
 The thresholds of A4 are the values at which the processor checks every
 reading. The warning threshold is the lower of the two, and a reading at or
@@ -175,11 +178,8 @@ above the critical threshold is critical.
 | Post-curing oven | 100 | 110 | 120 | Assumption for all three values. The 100 degrees Celsius of the laboratory validation oven in the same source (Lux et al., 2020, p. 400) is a plausibility check only, because it is not a production post-curing oven. The margins of 10 and 20 degrees Celsius are chosen so that the warning leaves time to intervene before the critical value |
 | Grinding machine | 45 | 60 | 75 | Assumption for all three values, no source. Grinding machines are kept to show that the architecture is not tied to one machine type |
 
-The parameters of the checks that A4 does not cover, the margin by which a
-temperature has to fall before an alert closes (FR4) and the window and the
-limit of the rate of rise (FR5), are fixed together with their reasoning when
-the rules are implemented in B4. The heating rates reported by Lux et al.
-(2020, p. 405) serve as the reference for the rate limit.
+The parameters of the checks that A4 does not cover, the margin of A14 and the
+window and limit of A15, were fixed when the rules were implemented in B4.
 
 ## Demonstration scenario for the steering committee
 
@@ -191,6 +191,17 @@ history of the machine shows the course of the incident afterwards. The
 scenario is scripted and seeded, so that it runs identically every time and
 the time from crossing the critical threshold to the visible alert can be
 measured. Details are fixed in B7.
+
+The overheating of the scenario rises at 5 degrees Celsius per minute (A16),
+which is above the limit of 3 degrees Celsius per minute of A15, so that the
+rate of rise warning comes first. For a mould that starts at 70 degrees Celsius,
+the warning threshold of 80 is crossed after about 2 minutes and the critical
+threshold of 95 after about 5 minutes. In the tests of the rules, a mould that
+has run normally for 100 seconds and then rises at that rate raises the rate of
+rise warning 34 seconds after the rise begins, at 72.9 degrees Celsius, which is
+86 seconds before the warning threshold is reached. If the rise begins at the
+start of a run, the window has to fill first, and the warning follows after 60
+seconds at 75 degrees Celsius, which is still 60 seconds before the threshold.
 
 ## Measurement plan
 

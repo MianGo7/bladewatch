@@ -173,6 +173,17 @@ producer, 3 for the command line, and 4 for the module boundaries, and 5
 integration tests that publish to a temporary topic and read it back with a new
 consumer group.
 
+B4, the alert rules. The module `rules` with the alert state per machine (normal,
+warning, critical, recovered), the closing of an alert with a hysteresis margin,
+the sliding window of the rate of rise with a least squares slope, and the
+events that the processor of B5 will store and publish. `RuleSettings` was added
+to `config` for the margin, the window, and the limit. The state diagram
+`alert-states.puml` is checked by a test against the allowed transitions in the
+code, and 50 tests cover the rules, among them the exact threshold and closing
+values, the oscillation around both levels, a deterministic series checked
+against an independent least squares fit, normal operation for two hours per
+machine type with noise, and the redelivery of readings.
+
 **Decisions.** ADR-0013 to ADR-0015 span both days. ADR-0016 selects
 confluent-kafka as the client library, with `kafka-python` and `aiokafka` as the
 rejected alternatives and the expectation about the load generator named as an
@@ -183,6 +194,18 @@ item does not name, because the architecture of the project makes it the source
 of random numbers for the sensor; the ADR says so. The measurement noise is the
 new assumption A13 with a value of 0.5 degrees Celsius and no source. FR1 and FR2
 are marked done, and NFR7 is partly met until the rules exist in B4.
+
+ADR-0018 records the lifecycle of an alert. The severity is the highest one
+reached, so that a critical alert is not downgraded, because a downgrade would
+repeat a severity and status under one alert identifier and collide with the key
+of the alert table of ADR-0014; the table did not have to change. An alert that a
+rise caused closes only after the rate has stayed below the limit for a full
+window, because otherwise a rise that stops at 72 degrees Celsius would close the
+alert at the next reading. The author fixed the parameters: a margin of 2.0
+degrees Celsius (A14), a window of 60 seconds with a limit of 3 degrees Celsius
+per minute (A15), and an overheating of 5 degrees Celsius per minute for the
+demonstration (A16). The sources are the heating rates of Lux et al. (2020, p.
+405) and the sliding windows of Akidau et al. (2015, p. 1794).
 
 **Problems.** `uv add` wrote the new dependencies with a lower bound, which the
 requirement of exact pins does not allow, and they were pinned with a second
@@ -199,6 +222,19 @@ topic that the processor of B5 would have read, so the topic was deleted and
 recreated by the job `kafka-init`, and the stack is in the state it had before. A
 test run against the real topic is not repeated for that reason.
 
+Several tests of B4 were wrong before the rules were. One test unpacked a single
+event from a series that correctly produced two. Two series were meant to stay
+below the warning threshold but climbed above it, because their start values were
+too high for the rate and the length, which was noticed because the assertion saw
+an event that was not expected. Ruff reported section comments of the form `FR4:
+hysteresis` as commented out code, and the comments were rewritten as sentences
+instead of silencing the rule. The first draft of the exactness test at the limit
+was dropped, because a rate of exactly 3 degrees Celsius per minute depends on
+floating point rounding; the tests use rates on both sides of the limit and the
+ADR names the imprecision. The slope is recomputed from all 61 readings of the
+window per reading, which is simple and correct but may be a visible share of the
+processing time in M2.
+
 **Observation.** The default partitioner of the client does not spread the
 twelve machine identifiers evenly over six partitions. With the seed of the
 check and a topic of six partitions the machines landed as follows: partition 0
@@ -212,7 +248,18 @@ consumer of the group would carry half of the machines. This is recorded in A10
 and is a point for the discussion of the limits of scaling by partitions, because
 a Java client with a different partitioner would place the same keys differently.
 
-**Next.** B4, the alert rules. The margin for closing an alert, the window and
-limit of the rate of rise, and the rate of the injected overheating are decided
-there and in B7; the rate limit is to be derived from the heating rates of Lux et
-al. (2020, p. 405) and is a point to settle with the author.
+**Observation (B4).** In the tests of the rules, a mould that has run normally
+for 100 seconds and then rises at 5 degrees Celsius per minute raises the rate of
+rise warning 34 seconds after the rise begins, at 72.9 degrees Celsius, and the
+warning threshold of 80 would be reached after 120 seconds and the critical
+threshold of 95 after 300 seconds, at which the critical alert is raised under
+the identifier of the same alert. If a run starts with the rise, the window has to
+fill first and the warning follows after 60 seconds at 75 degrees Celsius. These
+are properties of the rules for a deterministic series and not measurements of
+the system.
+
+**Next.** B5, the stream processor and the storage, with the choice of the
+PostgreSQL driver and its record. The state of the trackers has to be restored
+after a restart from the stored readings of the last window and the open alerts,
+and the storage has to write the alert events with the key of ADR-0014. The
+continuous integration run on GitHub is still outstanding.

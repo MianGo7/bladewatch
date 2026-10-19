@@ -637,3 +637,75 @@ errors, derived in the comments of the tests, and a different seed would pass
 with a probability above 99.9999 percent. The rate of an injected overheating is
 a parameter of the scenario and is fixed in B7, together with the rate limit of
 the rule in B4.
+
+## ADR-0018: Lifecycle of an alert, hysteresis, and the rate of rise check
+
+Date: 2026-10-19. Status: accepted.
+
+**Context.** The rules have to raise an alert when a threshold is reached (FR3),
+keep it from flapping (FR4), and warn of a rapid rise before the warning
+threshold is reached (FR5). The result has to fit the alert table of ADR-0014,
+whose key is the alert identifier, the severity, and the status, and it has to
+survive the redelivery of readings that ADR-0012 accepts. The rules live in
+`rules` as pure code, so that they run in unit tests without Docker.
+
+**Decision.** A tracker holds the state of one machine, which is normal,
+warning, critical, or recovered, and turns each reading into at most one event.
+A temperature at or above the warning threshold raises a warning, and one at or
+above the critical threshold raises a critical alert, also when it is reached by
+a jump from normal. The severity is the highest one that the alert has reached,
+so that an alert that has become critical stays critical until it closes and
+never returns to warning. An alert closes when the temperature falls below the
+warning threshold less the margin of 2.0 degrees Celsius (A14); the comparison
+is strict, so that a temperature exactly at the closing level keeps the alert
+open. The state recovered is the state of the reading at which an alert closed. It
+lasts for one reading, after which the state is normal, and a reading that
+already meets a condition opens a new alert from recovered. A new alert has a new
+identifier, which consists of the machine, the kind, and the time of the reading
+that opened it.
+
+The rate of rise is the slope of a least squares line through the readings of a
+sliding window of 60 seconds, and it counts as exceeded when it is strictly
+above 3 degrees Celsius per minute (A15). The check is silent until the window
+spans its full length, less half a reading interval to tolerate jitter. A
+warning of the kind rate of rise is raised from the state normal when the limit
+is exceeded and no threshold is reached. Because a rise can stop below the
+closing level, an alert of this kind closes only when, in addition to the
+temperature condition, the rate has stayed below the limit for a full window
+since it was last exceeded. An alert that has escalated to critical by a
+threshold is of the kind threshold from then on and closes by the temperature
+alone. A reading that is not newer than the last one is ignored, so that a
+redelivery changes neither the state nor the window.
+
+**Alternatives.** The difference of the first and the last reading of the window
+was rejected as an estimate of the rate. With the noise of A13 it has a standard
+error of 0.71 degrees Celsius per minute, against 0.22 for the least squares
+slope over 60 readings, and the limit of 3 would then lie only 2.1 standard errors
+above the highest normal heating rate of 1.5 degrees Celsius per minute (Lux et
+al., 2020, p. 405) instead of 6.7. An exponentially weighted rate was rejected
+because its smoothing constant is another parameter without a source. Sliding
+windows are the usual means to delineate a finite part of an unbounded stream
+(Akidau et al., 2015, p. 1794), and a framework window of Kafka Streams or Flink,
+which ADR-0006 rejected for the processor, would give the same result with the
+state held by the framework. A downgrade of a critical alert to a warning, with
+its own event, was rejected because the same severity and status would then recur
+under one alert identifier and collide with the key of the alert table; it would
+also report a machine at 90 degrees Celsius as merely warm, while the operator
+still has to act on the critical alert. A holding time for threshold alerts was
+rejected, because the margin already prevents flapping at the noise of A13, and a
+holding time would delay the closing of every alert by its length.
+
+**Consequences.** One reading causes at most one event, and one alert causes at
+most three events, a warning, an escalation to critical, and a closing, so that
+every event has its own key in the alert table and no change of that table is
+needed. The slope is recomputed from all readings of the window for each reading,
+which costs about 60 operations per reading in plain Python and may show up as a
+share of the processing time in M2; an incremental computation is a known option
+that is not taken before a measurement shows the need. Comparing floating point
+numbers makes the limit imprecise at the level of rounding, so that a rise of
+exactly 3 degrees Celsius per minute may or may not warn, and the tests use
+rates on either side of the limit. The state of a tracker is lost when the
+processor stops. It is restored in B5 by replaying the readings of the last
+window from the database, which the rule of ignoring old readings makes safe, and
+by reading the open alerts. The model has no timeout for a sensor that falls
+silent while an alert is open, which is a limit of the prototype.
