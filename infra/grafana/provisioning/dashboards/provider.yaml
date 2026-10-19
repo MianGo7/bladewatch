@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: bladewatch
+    type: file
+    # The dashboard exists only as a file in the repository. A change made in
+    # the browser is exported back into infra/grafana/dashboards.
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

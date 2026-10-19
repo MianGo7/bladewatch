@@ -1,0 +1,20 @@
+apiVersion: 1
+
+datasources:
+  - name: TimescaleDB
+    uid: bladewatch-timescaledb
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: timescaledb:5432
+    user: bladewatch
+    jsonData:
+      database: bladewatch
+      sslmode: disable
+      # Grafana offers the TimescaleDB functions in the query editor when this
+      # flag is set.
+      timescaledb: true
+      postgresVersion: 1700
+    secureJsonData:
+      password: bladewatch
+    isDefault: true
+    editable: false
