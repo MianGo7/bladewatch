@@ -7,10 +7,12 @@ from bladewatch.config import (
     GRINDER,
     MOULD,
     OVEN,
+    DatabaseSettings,
     KafkaSettings,
     Machine,
     MachineType,
     PlantSettings,
+    ProcessorSettings,
     RuleSettings,
     SensorSettings,
     TopicSettings,
@@ -156,3 +158,47 @@ def test_rule_settings_require_every_parameter_to_be_positive_and_finite(
 ) -> None:
     with pytest.raises(ValueError, match=name):
         RuleSettings(**{name: value})
+
+
+def test_the_default_database_settings_are_the_development_credentials() -> None:
+    database = default_plant().database
+
+    assert (database.host, database.port, database.dbname, database.user) == (
+        "localhost",
+        5432,
+        "bladewatch",
+        "bladewatch",
+    )
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536])
+def test_database_settings_reject_a_port_outside_the_valid_range(port: int) -> None:
+    with pytest.raises(ValueError, match="port"):
+        DatabaseSettings(port=port)
+
+
+def test_database_settings_require_a_host() -> None:
+    with pytest.raises(ValueError, match="host"):
+        DatabaseSettings(host="")
+
+
+def test_the_default_processor_settings_are_those_of_assumption_a17() -> None:
+    processor = default_plant().processor
+
+    assert (processor.batch_size, processor.poll_timeout_s) == (500, 0.2)
+
+
+def test_processor_settings_require_a_consumer_group() -> None:
+    with pytest.raises(ValueError, match="consumer_group"):
+        ProcessorSettings(consumer_group="")
+
+
+def test_processor_settings_require_a_positive_batch_size() -> None:
+    with pytest.raises(ValueError, match="batch_size"):
+        ProcessorSettings(batch_size=0)
+
+
+@pytest.mark.parametrize("timeout_s", [0.0, -1.0, math.nan])
+def test_processor_settings_require_a_positive_poll_timeout(timeout_s: float) -> None:
+    with pytest.raises(ValueError, match="poll_timeout_s"):
+        ProcessorSettings(poll_timeout_s=timeout_s)

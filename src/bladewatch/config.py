@@ -164,6 +164,67 @@ class KafkaSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class DatabaseSettings:
+    """The connection to TimescaleDB.
+
+    The defaults are the development credentials of compose.yaml, which protect
+    nothing beyond the developer machine.
+
+    Attributes:
+        host: Host name or address of the database.
+        port: TCP port of the database.
+        dbname: Name of the database.
+        user: Name of the database user.
+        password: Password of the database user.
+    """
+
+    host: str = "localhost"
+    port: int = 5432
+    dbname: str = "bladewatch"
+    user: str = "bladewatch"
+    password: str = "bladewatch"
+
+    def __post_init__(self) -> None:
+        """Validates that the address and the names are set."""
+        if not (self.host and self.dbname and self.user):
+            raise ValueError("DatabaseSettings: host, dbname, and user are required")
+        if not 0 < self.port < 65536:
+            raise ValueError(f"DatabaseSettings: invalid port {self.port}")
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessorSettings:
+    """The parameters of the stream processor.
+
+    Attributes:
+        consumer_group: Kafka consumer group of the processor.
+        batch_size: Largest number of readings that one batch holds (A17).
+        poll_timeout_s: Longest wait for a full batch in seconds (A17). A
+            partial batch is processed when it expires, so the value is the
+            largest delay that batching adds to the latency.
+    """
+
+    consumer_group: str = "bladewatch-processor"
+    batch_size: int = 500
+    poll_timeout_s: float = 0.2
+
+    def __post_init__(self) -> None:
+        """Validates the group and the batch parameters."""
+        if not self.consumer_group:
+            raise ValueError("ProcessorSettings: consumer_group must not be empty")
+        if self.batch_size < 1:
+            raise ValueError(
+                "ProcessorSettings: batch_size must be at least 1, "
+                f"got {self.batch_size}"
+            )
+        if not (math.isfinite(self.poll_timeout_s) and self.poll_timeout_s > 0.0):
+            raise ValueError(
+                "ProcessorSettings: poll_timeout_s must be positive, "
+                f"got {self.poll_timeout_s}"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class PlantSettings:
     """The monitored plant: its machines, its sensors, its topics, and Kafka.
 
@@ -173,6 +234,8 @@ class PlantSettings:
         rules: The parameters of the alert rules.
         topics: The Kafka topics.
         kafka: The connection to the broker.
+        database: The connection to TimescaleDB.
+        processor: The parameters of the stream processor.
     """
 
     machines: tuple[Machine, ...]
@@ -180,6 +243,8 @@ class PlantSettings:
     rules: RuleSettings = field(default_factory=RuleSettings)
     topics: TopicSettings = field(default_factory=TopicSettings)
     kafka: KafkaSettings = field(default_factory=KafkaSettings)
+    database: DatabaseSettings = field(default_factory=DatabaseSettings)
+    processor: ProcessorSettings = field(default_factory=ProcessorSettings)
 
     def __post_init__(self) -> None:
         """Validates that the machine identifiers are unique."""
