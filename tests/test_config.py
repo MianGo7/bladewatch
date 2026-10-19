@@ -11,6 +11,7 @@ from bladewatch.config import (
     Machine,
     MachineType,
     PlantSettings,
+    RuleSettings,
     SensorSettings,
     TopicSettings,
     default_plant,
@@ -134,3 +135,24 @@ def test_kafka_settings_require_bootstrap_servers() -> None:
 def test_settings_are_immutable() -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         default_plant().sensor.interval_s = 2.0
+
+
+def test_the_default_rule_settings_are_those_of_assumptions_a14_and_a15() -> None:
+    rules = default_plant().rules
+
+    assert (
+        rules.hysteresis_margin_c,
+        rules.rate_window_s,
+        rules.rate_limit_c_per_min,
+    ) == (2.0, 60.0, 3.0)
+
+
+@pytest.mark.parametrize(
+    "name", ["hysteresis_margin_c", "rate_window_s", "rate_limit_c_per_min"]
+)
+@pytest.mark.parametrize("value", [0.0, -1.0, math.nan, math.inf])
+def test_rule_settings_require_every_parameter_to_be_positive_and_finite(
+    name: str, value: float
+) -> None:
+    with pytest.raises(ValueError, match=name):
+        RuleSettings(**{name: value})

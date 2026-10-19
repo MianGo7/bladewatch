@@ -102,6 +102,32 @@ class SensorSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class RuleSettings:
+    """The parameters of the alert rules that the thresholds do not cover.
+
+    Attributes:
+        hysteresis_margin_c: Margin in degrees Celsius below the warning
+            threshold that the temperature has to reach before an alert closes
+            (A14).
+        rate_window_s: Length of the sliding window of the rate of rise check in
+            seconds (A15).
+        rate_limit_c_per_min: Rate of rise in degrees Celsius per minute above
+            which a warning is raised (A15).
+    """
+
+    hysteresis_margin_c: float = 2.0
+    rate_window_s: float = 60.0
+    rate_limit_c_per_min: float = 3.0
+
+    def __post_init__(self) -> None:
+        """Validates that every parameter is finite and positive."""
+        for name in ("hysteresis_margin_c", "rate_window_s", "rate_limit_c_per_min"):
+            value = getattr(self, name)
+            if not (math.isfinite(value) and value > 0.0):
+                raise ValueError(f"RuleSettings: {name} must be positive, got {value}")
+
+
+@dataclass(frozen=True, slots=True)
 class TopicSettings:
     """The names of the Kafka topics, which match infra and compose.yaml.
 
@@ -144,12 +170,14 @@ class PlantSettings:
     Attributes:
         machines: The monitored machines, with unique identifiers.
         sensor: The measurement model shared by every sensor.
+        rules: The parameters of the alert rules.
         topics: The Kafka topics.
         kafka: The connection to the broker.
     """
 
     machines: tuple[Machine, ...]
     sensor: SensorSettings = field(default_factory=SensorSettings)
+    rules: RuleSettings = field(default_factory=RuleSettings)
     topics: TopicSettings = field(default_factory=TopicSettings)
     kafka: KafkaSettings = field(default_factory=KafkaSettings)
 
