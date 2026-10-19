@@ -1,0 +1,33 @@
+@startuml alert-states
+!include _style.puml
+
+title State of the alert of one machine
+
+state Normal
+state Warning
+state Critical
+state Recovered
+
+[*] --> Normal
+
+Normal --> Warning : temperature at or above the warning threshold,\nor rise above the limit over a full window
+Normal --> Critical : temperature at or above the critical threshold
+Warning --> Critical : temperature at or above the critical threshold
+Warning --> Recovered : temperature below the warning threshold\nless the margin
+Critical --> Recovered : temperature below the warning threshold\nless the margin
+Recovered --> Normal : next reading, no condition met
+Recovered --> Warning : next reading at or above the warning threshold\nor rise above the limit
+Recovered --> Critical : next reading at or above the critical threshold
+
+note right of Warning
+  An alert that a rise caused closes only after the rate
+  has stayed below the limit for a full window.
+  A critical alert stays critical until it closes.
+end note
+
+note right of Recovered
+  The state of the reading at which the alert closed.
+  It lasts for one reading.
+end note
+
+@enduml

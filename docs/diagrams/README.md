@@ -12,7 +12,7 @@ from `compose.yaml`.
 | --- | --- | --- | --- |
 | `architecture-overview.puml` | Component diagram of the target architecture with its layers, the chosen tools, and the existing data warehouse | B1 | done |
 | `reading-to-alert-sequence.puml` | Sequence of one reading from the sensor through the broker and the processor to the database, the alert, and the dashboard | B1 | done |
-| `alert-states.puml` | State diagram of the alert of one machine | B4 | open |
+| `alert-states.puml` | State diagram of the alert of one machine | B4 | done |
 | `package-components.puml` | Component diagram of the Python package, with the imports between modules and libraries | B9 | open |
 | `deployment.puml` | Deployment diagram of the containers, their ports, volumes, and topics | B9 | open |
 
@@ -28,3 +28,5 @@ from `compose.yaml`.
   generated output and are not versioned.
 - The structure diagrams are checked by a test: the arrows of the component
   diagram have to equal the imports of the source files.
+- The state diagram of the alert is checked by a test: its arrows have to equal
+  the allowed transitions in `src/bladewatch/rules.py`.
