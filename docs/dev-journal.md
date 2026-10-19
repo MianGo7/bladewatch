@@ -40,6 +40,18 @@ requirement names its item and its check, and the diagrams
 `architecture-overview.puml` and `reading-to-alert-sequence.puml`, both
 rendered with PlantUML without errors.
 
+B2, the infrastructure with Docker Compose, implemented and verified in the
+evening. `compose.yaml` with Apache Kafka in KRaft mode, TimescaleDB, and
+Grafana, each pinned to an exact tag and with a health check, and the one-shot
+job `kafka-init` that creates the topics `machine-temperature` (6 partitions)
+and `machine-alerts` (3 partitions) with seven day retention and the log append
+time. The schema scripts in `infra/timescaledb/`: the hypertable `readings`, the
+table `alerts`, the continuous aggregate `readings_hourly`, and the compression
+and retention policies. The Grafana provisioning of the TimescaleDB data source
+and of the dashboard provider, with an empty dashboard directory until B6.
+Twelve integration tests and four unit tests, and the sections on running the
+stack and on the tools and licences in `README.md`.
+
 **Decisions.** Task 2 was selected out of the three tasks of the course. Task
 1 bundles about eight separate analysis requirements, a time series built from
 snapshot data, and topic modelling of multilingual reviews into 7 to 10 pages
@@ -67,6 +79,17 @@ once with idempotent storage (ADR-0012). The margin for closing an alert (FR4)
 and the window and limit of the rate of rise (FR5) are deliberately left to
 B4, where the rules are written, and the requirements are worded so that they
 are testable with configured values.
+
+ADR-0013 records the stack, the image versions, the listeners, the topic
+creation job, the health checks, and the licence check. ADR-0014 records the
+schema, in particular the alert table as a log of events and the refresh window
+of the aggregate inside the retention. ADR-0015 records that the tests of this
+item use only the standard library and `docker compose exec`, so that the choice
+of the Kafka client in B3 and of the database driver in B5 is not made early.
+The partition counts, the topic retention, and the chunking, compression, and
+retention of the readings are new assumptions A10 to A12 in `concept.md`. FR8,
+FR10, NFR3, NFR4, and NFR5 are marked done, and FR2 is partly met because the
+keying by machine follows with the producer in B3.
 
 **Problems.** The Python interpreter of macOS is version 3.9, which is why the
 interpreter is managed by uv. The first test run failed because
@@ -102,7 +125,44 @@ framework support for state and windows (ADR-0006), recomputation only within
 the Kafka retention (ADR-0003), and a database that is polled and not pushed to
 (ADR-0008).
 
-**Next.** B2, the infrastructure with Docker Compose, including the check of
-the licence texts of the pinned images and the partition count and retention
-of the topics. Before the first push, the workflow has to be seen running on
-GitHub.
+Both failures of the first test run of B2 were faults in the tests and not in
+the stack. The test of idempotent storage built two different timestamps with
+`now()` in two statements and therefore stored two readings, which was noticed
+because the count was 2 and not 1. The call to the Grafana interface used a
+basic authentication handler that waits for a challenge that Grafana does not
+send, so the call received a 401; an explicit header solved it. A first draft of
+the tests also contained a dead code fragment and an undefined helper, which were
+removed before the first run, and the helpers were moved out of the `conftest.py`
+into a module of their own because a relative import from a `conftest.py` does
+not work. The TimescaleDB image contains no licence text, so the Timescale
+License was read from the repository of the pinned version, and the statement
+that NFR3 means free of charge stays a limit. The output of
+`docker compose up --wait` reports the finished job `kafka-init` as healthy,
+which is correct but easy to misread. No change to the infrastructure was needed
+after the first start, which is noted because Grafana 13 is a recent major
+version and adjustments to the provisioning were expected.
+
+**Observation.** From an empty state, `docker compose down -v` followed by
+`docker compose up -d --wait` brought every service to healthy in 11 seconds,
+and the twelve integration tests ran in about 7 seconds. These are single
+observations on one machine and not measurements. Docker Desktop was set to 18
+CPUs and 7.7 GiB of memory; the hardware is recorded in full before B8.
+
+**Next.** B3, the sensor simulator and the producer, which includes the choice
+of the Kafka client library and its record. The distribution of twelve machine
+identifiers over six partitions should be looked at when the producer exists,
+because hashing does not guarantee an even spread. Before the first push, the
+workflow has to be seen running on GitHub.
+
+## 2026-10-19
+
+**Worked on.** Closing of B2. The implementation, the tests, and the first
+version of the documents were finished on the evening of 2026-10-18, as recorded
+in that entry. This day was used to go through the documents of B2 once more and
+to commit the work in separate commits.
+
+**Decisions.** None beyond ADR-0013 to ADR-0015, which span both days.
+
+**Problems.** None recorded for this day.
+
+**Next.** B3, the sensor simulator and the producer.

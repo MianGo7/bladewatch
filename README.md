@@ -20,11 +20,45 @@ development journal are in `docs/`. The work is organised in the backlog items
 of `docs/backlog.md`, and the status of every requirement is traced in
 `docs/requirements.md`.
 
+## Running the stack
+
+`docker compose up -d --wait` starts Apache Kafka, TimescaleDB, and Grafana and
+returns when every service is healthy. A one-shot job creates the topics
+`machine-temperature` and `machine-alerts` and then exits with status 0, so it
+shows as exited in `docker compose ps -a`. The database schema is created on the
+first start with an empty volume; `docker compose down -v` removes the volumes
+for a clean start.
+
+| Service | Address on the host | Development credentials |
+| --- | --- | --- |
+| Apache Kafka | `localhost:9092` | none |
+| TimescaleDB | `localhost:5432`, database `bladewatch` | user `bladewatch`, password `bladewatch` |
+| Grafana | `http://localhost:3000` | user `admin`, password `bladewatch` |
+
+All ports are bound to the loopback interface, and the credentials are
+development defaults that protect nothing beyond the machine they run on.
+
+## Tools and licences
+
+| Tool | Version | Licence |
+| --- | --- | --- |
+| Apache Kafka | 4.3.1 | Apache License 2.0 |
+| TimescaleDB | 2.30.2 on PostgreSQL 17 | Timescale License for compression and continuous aggregates, free for self-hosted internal use |
+| Grafana | 13.2.4 | GNU Affero General Public License 3 |
+| Python | 3.13 | Python Software Foundation License |
+| pytest | 9.1.1 | MIT |
+| Ruff | 0.17.1 | MIT |
+
+The licences of the three services were read in the pinned images and, for
+TimescaleDB, in the licence file of the version in its repository. The licences
+of pytest and Ruff are taken from their package metadata. The reasoning is in
+ADR-0013 of `docs/decision-log.md`.
+
 ## Prerequisites
 
 The project is developed with Python 3.13 and managed with
-[uv](https://docs.astral.sh/uv/). The container stack that follows in a later
-backlog item additionally needs Docker with Compose.
+[uv](https://docs.astral.sh/uv/). The container stack additionally needs Docker
+with Compose.
 
 ## Commands
 

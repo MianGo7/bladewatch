@@ -51,7 +51,7 @@ Documents to update: `concept.md`, `requirements.md`, `decision-log.md`,
 
 ## B2: Infrastructure with Docker Compose
 
-Status: open.
+Status: done.
 
 Scope: `compose.yaml` with Apache Kafka in KRaft mode, TimescaleDB, and
 Grafana, each pinned to an exact image version and with a health check. The

@@ -420,3 +420,137 @@ the alert rules is not covered by this mechanism and is restored in B5 from the
 stored readings and the open alerts. M3 verifies the claim by counting
 `sequence` gaps and repeats after a stop and restart under load, and the result
 is reported as measured.
+
+## ADR-0013: Docker Compose stack with pinned images and a topic creation job
+
+Date: 2026-10-18 to 2026-10-19. Status: accepted.
+
+**Context.** The stack has to start with one command on a developer machine
+(NFR4), every image has to be pinned to an exact version (NFR5), and the tools
+have to be free of charge (NFR3). Three services are required, Kafka,
+TimescaleDB, and Grafana, and the topics have to exist with their
+configuration before the first producer or consumer connects.
+
+**Decision.** `compose.yaml` defines the services `kafka`, `timescaledb`, and
+`grafana` and the one-shot job `kafka-init`. The images are `apache/kafka:4.3.1`,
+`timescale/timescaledb:2.30.2-pg17`, and `grafana/grafana:13.2.4`, which were the
+newest release lines on Docker Hub on 2026-10-18 with a patch release already
+published. TimescaleDB runs on PostgreSQL 17, one major version behind the newest
+offered, 18, because the former has had a full release cycle. Kafka runs as a single combined broker and
+controller in KRaft mode (ADR-0005) with two client listeners, one advertised as
+`localhost:9092` for processes on the developer machine and one as
+`kafka:29092` for the other containers. Automatic topic creation is switched off,
+and `kafka-init` creates `machine-temperature` and `machine-alerts` with the
+values of A10 and A11 and the log append time (ADR-0011). Every long running
+service has a health check, and `docker compose up -d --wait` returns when all
+of them are healthy and the job has exited with status 0. The database check
+uses the TCP address, because during the first initialisation the image runs a
+temporary server on the socket alone, and a check over the socket would report
+healthy before the schema scripts have run. All ports are bound to the loopback
+interface, and the credentials are the development defaults documented in
+`README.md`.
+
+**Licences.** The licence texts of the pinned versions were checked. The Kafka
+image contains the Apache License 2.0 in `/opt/kafka/LICENSE`, and the Grafana
+image contains the GNU Affero General Public License version 3 in
+`/usr/share/grafana/LICENSE`. The TimescaleDB image does not contain a licence
+text, but the running server reports `timescaledb.license = timescale`, which
+means that the compression and continuous aggregate features are used under the
+Timescale License. Its text, read from the tag 2.30.2 of the project repository
+(`tsl/LICENSE-TIMESCALE`, Timescale License Agreement posted 24 September 2020),
+grants a licence to use the software "solely for Your own internal business
+purposes" and prohibits offering it as database-as-a-service or
+software-as-a-service. Self-hosted internal use at no cost, as in this case, is
+therefore permitted, and NFR3 is read as free of charge.
+
+**Alternatives.** The `latest` tag was rejected because it makes the stack
+unreproducible. A Kafka image from a third party, for instance with a bundled
+ZooKeeper, was rejected because the official Apache image supports KRaft
+directly. Topic creation by the first producer was rejected because it would
+create a topic with the broker defaults and hide a misspelled name. Creating the
+topics from a test or a script on the host was rejected because the stack would
+not be complete after the single start command. A health check over the socket
+for PostgreSQL was rejected for the reason given above.
+
+**Consequences.** The job `kafka-init` is the one container that does not keep
+running and shows as exited in `docker compose ps -a`. The initialisation scripts
+of the database run only when the data volume is empty, so a change to the
+schema takes effect after `docker compose down -v` and a new start. The
+Timescale License is not an open source licence, which stays a limit of the
+statement that all tools are freely available. The stack has no authentication
+between its components and is not suitable for anything but a development
+machine.
+
+## ADR-0014: Schema, retention, and compression of the hot storage
+
+Date: 2026-10-18 to 2026-10-19. Status: accepted.
+
+**Context.** The hot storage holds the readings (FR7), the alerts (FR7), and the
+hourly aggregates (FR8, FR10). It has to carry the four stage timestamps (NFR8),
+reject a redelivered reading (ADR-0012), and stay bounded in size.
+
+**Decision.** The table `readings` is a hypertable partitioned by `measured_at`
+with a chunk interval of one day. Its primary key is `machine_id` and
+`measured_at`, which makes the insert idempotent and contains the partitioning
+column as TimescaleDB requires. The columns `kafka_appended_at`, `processed_at`,
+and `stored_at` hold the other three stage timestamps, and `stored_at` defaults
+to the time of the insert. The table `alerts` is an append-only log of alert
+events, keyed by `alert_id`, `severity`, and `status`, so that a raise, an
+escalation from warning to critical, and a closing of one alert are three rows
+and a redelivered event is a single row. The continuous aggregate
+`readings_hourly` holds minimum, mean, maximum, and count per machine and hour,
+refreshes every 15 minutes, and reads the most recent hour from the raw table
+because real-time aggregation is switched on. Chunks older than seven days are
+compressed, segmented by machine, and raw readings older than 90 days are dropped
+(A12). The aggregate is the view that the existing data warehouse reads, as
+decided in ADR-0010.
+
+**Alternatives.** An alert table with one row per alert that is updated on every
+transition was rejected, because it would lose the course of an incident, which
+the demonstration scenario shows from the history, and because an update is not
+idempotent in the way an insert with a key is. A plain table instead of a
+hypertable was rejected in ADR-0007. Storing the machine type and thresholds in
+the database was left out of this item, because the thresholds have one source in
+the configuration (concept, message format), and the dashboard will need them
+only in B6. A continuous aggregate that is materialised only was rejected,
+because the dashboard would then show the current hour with a delay of up to the
+refresh interval.
+
+**Consequences.** The primary key rejects a second reading of one machine at the
+same instant, which is correct for the simulator and has to hold for any real
+sensor as well. The alert event model is a decision about the log and not about
+the states, which are specified in B4, and a change of the states may need a new
+version of the table. The aggregate has no retention policy, so it grows by one
+row per machine and hour. The refresh window of three days has to stay inside
+the retention of 90 days, otherwise a refresh would recompute buckets from
+dropped chunks.
+
+## ADR-0015: Infrastructure tests without a Kafka or database client
+
+Date: 2026-10-18 to 2026-10-19. Status: accepted.
+
+**Context.** The backlog requires a smoke test of every service and checks of the
+topics and the schema, but the Kafka client library is chosen in B3 and the
+database driver in B5, and a dependency may only be added with a record that
+names it.
+
+**Decision.** The integration tests of B2 use the standard library only. They
+test reachability with sockets, Grafana through its HTTP interface with
+`urllib`, and Kafka and the database through `docker compose exec` with the
+command line tools that are already inside the containers: `kafka-topics.sh`,
+the console producer and consumer, and `psql`. The tests that write rows or
+topics use names of their own, remove them in a `finally` block, and leave the
+stack as they found it. They skip with a message when a port is closed. The
+check that every image is pinned and the check that every Python dependency is
+pinned are unit tests that read `compose.yaml` and `pyproject.toml` as text.
+
+**Alternatives.** Adding a Kafka client and a PostgreSQL driver in B2 was
+rejected because it would settle the choice of the library ahead of the item that
+needs it and without the comparison that B3 and B5 owe. Parsing `compose.yaml`
+with a YAML library was rejected for the same reason, and a regular expression on
+the `image:` lines is sufficient for the check.
+
+**Consequences.** The tests start a process per call, which makes them slower than
+a client in the test process, about 7 seconds for 12 tests. They depend on the
+container and service names of `compose.yaml`. The tests of B5 and B8 use the
+client libraries and may replace parts of these.
