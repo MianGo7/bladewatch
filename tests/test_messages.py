@@ -6,6 +6,7 @@ import pytest
 
 from bladewatch.messages import (
     SCHEMA_VERSION,
+    Alert,
     MessageError,
     Reading,
     UnsupportedSchemaVersionError,
@@ -152,3 +153,107 @@ def test_a_message_with_an_integer_temperature_is_accepted_as_a_float() -> None:
     document["temperature_c"] = 70
 
     assert Reading.from_json(json.dumps(document)).temperature_c == 70.0
+
+
+PROCESSED_AT = datetime(2026, 10, 19, 8, 30, 15, 250000, tzinfo=UTC)
+
+
+def _alert(**changes: object) -> Alert:
+    fields: dict[str, object] = {
+        "alert_id": "mould-01:rate_of_rise:2026-10-19T08:29:41.000000Z",
+        "machine_id": "mould-01",
+        "kind": "rate_of_rise",
+        "severity": "warning",
+        "status": "raised",
+        "temperature_c": 72.9,
+        "limit": 3.0,
+        "measured_at": MEASURED_AT,
+        "processed_at": PROCESSED_AT,
+    }
+    fields.update(changes)
+    return Alert(**fields)
+
+
+def test_an_alert_is_serialised_with_the_fields_of_the_format() -> None:
+    document = json.loads(_alert().to_json())
+
+    assert document == {
+        "schema_version": 1,
+        "alert_id": "mould-01:rate_of_rise:2026-10-19T08:29:41.000000Z",
+        "machine_id": "mould-01",
+        "kind": "rate_of_rise",
+        "severity": "warning",
+        "status": "raised",
+        "temperature_c": 72.9,
+        "limit": 3.0,
+        "measured_at": "2026-10-19T08:30:15.123456Z",
+        "processed_at": "2026-10-19T08:30:15.250000Z",
+    }
+
+
+def test_an_alert_survives_a_round_trip_through_json() -> None:
+    alert = _alert()
+
+    assert Alert.from_json(alert.to_json().encode("utf-8")) == alert
+
+
+def test_the_key_of_an_alert_is_the_machine_identifier() -> None:
+    assert _alert(machine_id="oven-03").key() == b"oven-03"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("kind", "other"), ("severity", "high"), ("status", "open")],
+)
+def test_an_alert_rejects_a_value_outside_its_vocabulary(
+    field: str, value: str
+) -> None:
+    with pytest.raises(MessageError, match=field):
+        _alert(**{field: value})
+
+
+def test_an_alert_rejects_an_empty_alert_identifier() -> None:
+    with pytest.raises(MessageError, match="alert_id"):
+        _alert(alert_id="")
+
+
+@pytest.mark.parametrize("field", ["measured_at", "processed_at"])
+def test_an_alert_rejects_a_time_that_is_not_in_utc(field: str) -> None:
+    with pytest.raises(MessageError, match=field):
+        _alert(**{field: datetime(2026, 10, 19, 8, 30, 15)})
+
+
+@pytest.mark.parametrize("field", ["temperature_c", "limit"])
+def test_an_alert_rejects_a_number_that_is_not_finite(field: str) -> None:
+    with pytest.raises(MessageError, match=field):
+        _alert(**{field: math.nan})
+
+
+def test_an_alert_message_with_an_unknown_schema_version_is_rejected() -> None:
+    document = json.loads(_alert().to_json())
+    document["schema_version"] = 2
+
+    with pytest.raises(UnsupportedSchemaVersionError):
+        Alert.from_json(json.dumps(document))
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "alert_id",
+        "machine_id",
+        "kind",
+        "severity",
+        "status",
+        "temperature_c",
+        "limit",
+        "measured_at",
+        "processed_at",
+    ],
+)
+def test_an_alert_message_with_a_missing_field_is_rejected(field: str) -> None:
+    document = json.loads(_alert().to_json())
+    del document[field]
+
+    with pytest.raises(MessageError, match=field):
+        Alert.from_json(json.dumps(document))
