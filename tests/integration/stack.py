@@ -43,3 +43,19 @@ def container_states() -> dict[str, dict[str, object]]:
     output = compose("ps", "-a", "--format", "json").stdout
     rows = [json.loads(line) for line in output.splitlines() if line]
     return {row["Service"]: row for row in rows}
+
+
+def delete_consumer_group(group_id: str) -> None:
+    """Removes a consumer group that a test created, so that it leaves no trace."""
+    compose(
+        "exec",
+        "-T",
+        "kafka",
+        "/opt/kafka/bin/kafka-consumer-groups.sh",
+        "--bootstrap-server",
+        "localhost:29092",
+        "--delete",
+        "--group",
+        group_id,
+        check=False,
+    )

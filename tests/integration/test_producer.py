@@ -15,7 +15,7 @@ from bladewatch.producer import (
     generate_ticks,
 )
 
-from .stack import compose
+from .stack import compose, delete_consumer_group
 
 pytestmark = pytest.mark.integration
 
@@ -63,12 +63,13 @@ def topic() -> Iterator[str]:
 
 
 def _consume_all(topic: str, expected: int) -> list[Message]:
+    group_id = f"check-{uuid.uuid4().hex[:8]}"
     consumer = Consumer(
         {
             "bootstrap.servers": "localhost:9092",
             "broker.address.family": "v4",
             # A new group reads from the start, as a replay would (FR2).
-            "group.id": f"check-{uuid.uuid4().hex[:8]}",
+            "group.id": group_id,
             "auto.offset.reset": "earliest",
             "enable.auto.commit": False,
         }
@@ -86,6 +87,7 @@ def _consume_all(topic: str, expected: int) -> list[Message]:
                 break
     finally:
         consumer.close()
+        delete_consumer_group(group_id)
     return messages
 
 

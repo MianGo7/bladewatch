@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from .stack import compose, container_states, sql
+from .stack import compose, container_states, delete_consumer_group, sql
 
 pytestmark = pytest.mark.integration
 
@@ -112,6 +112,7 @@ def test_a_new_consumer_group_replays_a_topic_from_its_start() -> None:
             stdin="mould-01:first\nmould-01:second\noven-01:third\n",
         )
 
+        replay_group = f"replay-{uuid.uuid4().hex[:8]}"
         replayed = compose(
             "exec",
             "-T",
@@ -122,13 +123,14 @@ def test_a_new_consumer_group_replays_a_topic_from_its_start() -> None:
             "--topic",
             topic,
             "--group",
-            f"replay-{uuid.uuid4().hex[:8]}",
+            replay_group,
             "--from-beginning",
             "--max-messages",
             "3",
             "--timeout-ms",
             "20000",
         ).stdout.split()
+        delete_consumer_group(replay_group)
     finally:
         compose(
             "exec",

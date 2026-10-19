@@ -37,3 +37,13 @@ def test_the_sensor_module_does_not_import_the_message_format() -> None:
     }
 
     assert "bladewatch.messages" not in modules
+
+
+def test_only_the_storage_module_imports_the_database_driver() -> None:
+    importers = {
+        path.stem
+        for path in PACKAGE.glob("*.py")
+        if "psycopg" in _imported_top_level_names(path.stem)
+    }
+
+    assert importers == {"storage"}
