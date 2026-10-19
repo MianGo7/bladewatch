@@ -18,17 +18,18 @@ processor -> processor : check thresholds and\nrate of rise, update the\nstate o
 
 note over processor, db : The processor writes readings in batches.\nThe sequence shows one reading for clarity.
 alt a transition of the alert state occurs
-  processor -> db : insert reading and alert\nin one transaction
+  processor -> alertTopic : publish alert (alert_id, severity, status)
+  note right of alertTopic : Published and flushed before the\ndatabase commit. A failure of the write\nrepeats the event with the same alert_id.
+  processor -> db : insert readings and alert events\nin one transaction
   note right of db : Idempotent: primary key\n(machine_id, measured_at).\nThe database sets stored_at.
   db --> processor : committed
-  processor -> alertTopic : publish alert (alert_id, severity, status)
 else no transition
-  processor -> db : insert reading
+  processor -> db : insert readings
   db --> processor : committed
 end
 
 processor -> tempTopic : commit offset
-note right of processor : Offset is committed only after\nthe database transaction.\nA crash before it causes a redelivery\nthat the primary key absorbs.
+note right of processor : The offset is committed only after the\ndatabase transaction. A crash before it\ncauses a redelivery that the primary key\nabsorbs and the rules ignore.
 
 loop at each refresh of the dashboard
   grafana -> db : SQL query for\nreadings and open alerts
