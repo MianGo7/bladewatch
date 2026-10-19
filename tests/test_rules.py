@@ -23,6 +23,7 @@ from bladewatch.rules import (
     AlertState,
     AlertStatus,
     AlertTracker,
+    OpenAlert,
     RateWindow,
     Severity,
     create_trackers,
@@ -562,3 +563,95 @@ def test_the_state_diagram_shows_exactly_the_allowed_transitions() -> None:
     drawn = {(source.lower(), target.lower()) for source, target in arrows}
 
     assert drawn == {(str(a), str(b)) for a, b in ALLOWED_TRANSITIONS}
+
+
+# Restoring the state after a restart
+
+
+SCENARIOS = {
+    "rise to critical": [70.0] * 100 + [70.0 + 5.0 * s / 60.0 for s in range(1, 400)],
+    "rate alert that closes": ramp(60.0, 12.0, 61) + [72.0] * 200,
+    "threshold alert that closes": [70.0] * 20 + [85.0] * 30 + [70.0] * 30,
+    "critical that closes": [70.0] * 10 + [96.0] * 30 + [70.0] * 30,
+}
+
+
+def _history(
+    series: Sequence[float], upto: int, span_s: int
+) -> list[tuple[datetime, float]]:
+    first = max(0, upto - span_s)
+    return [(at(second), series[second]) for second in range(first, upto)]
+
+
+@pytest.mark.parametrize("name", list(SCENARIOS))
+def test_a_restored_tracker_gives_the_same_events_as_one_that_never_stopped(
+    name: str,
+) -> None:
+    series = SCENARIOS[name]
+    uninterrupted = make_tracker()
+    all_events = feed(uninterrupted, series)
+
+    for split in range(1, len(series), 7):
+        before = make_tracker()
+        feed(before, series[:split])
+        restored = make_tracker()
+        restored.restore(_history(series, split, 121), before.open_alert)
+
+        after = feed(restored, series[split:], start_s=float(split))
+
+        expected = [(s, e) for s, e in all_events if s >= split]
+        assert after == expected, f"split at {split}"
+        assert restored.state is uninterrupted.state
+
+
+def test_a_restored_tracker_ignores_readings_it_has_already_seen() -> None:
+    series = SCENARIOS["rise to critical"]
+    restored = make_tracker()
+    restored.restore(_history(series, 200, 121), None)
+
+    assert restored.observe(at(150), 96.0) is None
+    assert restored.observe(at(199), 96.0) is None
+
+
+def test_a_restored_tracker_takes_over_an_open_critical_alert() -> None:
+    tracker = make_tracker()
+    open_alert = OpenAlert(
+        "mould-01:threshold:x", AlertKind.THRESHOLD, Severity.CRITICAL
+    )
+    tracker.restore([(at(0), 90.0)], open_alert)
+
+    event = tracker.observe(at(1), 70.0)
+
+    assert tracker.state is AlertState.RECOVERED
+    assert event is not None
+    assert (event.alert_id, event.severity, event.status) == (
+        "mould-01:threshold:x",
+        Severity.CRITICAL,
+        AlertStatus.CLOSED,
+    )
+
+
+def test_a_tracker_reports_its_open_alert() -> None:
+    tracker = make_tracker()
+    assert tracker.open_alert is None
+
+    (_, event), *_ = feed(tracker, [80.0])
+
+    assert tracker.open_alert == OpenAlert(
+        event.alert_id, AlertKind.THRESHOLD, Severity.WARNING
+    )
+
+
+def test_a_tracker_that_has_closed_its_alert_reports_none() -> None:
+    tracker = make_tracker()
+    feed(tracker, [80.0, 77.0])
+
+    assert tracker.open_alert is None
+
+
+def test_a_tracker_can_only_be_restored_before_its_first_reading() -> None:
+    tracker = make_tracker()
+    tracker.observe(at(0), 70.0)
+
+    with pytest.raises(RuntimeError, match="restore"):
+        tracker.restore([(at(1), 70.0)], None)

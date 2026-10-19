@@ -7,6 +7,7 @@ Docker and without a message format. Implements FR3, FR4, and FR5.
 """
 
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -88,6 +89,21 @@ class AlertEvent:
     temperature_c: float
     limit: float
     measured_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class OpenAlert:
+    """The alert that a machine has open, as far as a restart needs to know it.
+
+    Attributes:
+        alert_id: Identifier of the alert.
+        kind: Condition that caused its latest event.
+        severity: Highest severity that it has reached.
+    """
+
+    alert_id: str
+    kind: AlertKind
+    severity: Severity
 
 
 class RateWindow:
@@ -186,6 +202,48 @@ class AlertTracker:
         """The current state of the alert."""
         return self._state
 
+    @property
+    def open_alert(self) -> OpenAlert | None:
+        """The alert that is open, or None in the states normal and recovered."""
+        if self._state not in (AlertState.WARNING, AlertState.CRITICAL):
+            return None
+        return OpenAlert(self._alert_id, self._kind, self._severity)
+
+    def restore(
+        self,
+        history: Iterable[tuple[datetime, float]],
+        open_alert: OpenAlert | None,
+    ) -> None:
+        """Rebuilds the state of a new tracker after a restart (ADR-0020).
+
+        The history only fills the rate window and the time of the last rise
+        above the limit. It raises no event, because the events of these readings
+        were stored before. The history has to span at least two window lengths,
+        so that every reading of the last window was judged on a full window.
+
+        Args:
+            history: The latest stored readings of the machine in ascending order
+                of time, as pairs of time of measurement and temperature.
+            open_alert: The alert that was open at the last reading, if any.
+
+        Raises:
+            RuntimeError: If the tracker has already seen a reading.
+        """
+        if self._last_measured_at is not None:
+            raise RuntimeError("restore is only possible before the first reading")
+        for measured_at, temperature_c in history:
+            self._track(measured_at, temperature_c)
+        if open_alert is None:
+            return
+        self._alert_id = open_alert.alert_id
+        self._kind = open_alert.kind
+        self._severity = open_alert.severity
+        self._state = (
+            AlertState.CRITICAL
+            if open_alert.severity is Severity.CRITICAL
+            else AlertState.WARNING
+        )
+
     def observe(self, measured_at: datetime, temperature_c: float) -> AlertEvent | None:
         """Evaluates one reading and returns the event that it causes, if any.
 
@@ -204,19 +262,23 @@ class AlertTracker:
             raise ValueError("measured_at must be timezone aware")
         if self._last_measured_at is not None and measured_at <= self._last_measured_at:
             return None
-        self._last_measured_at = measured_at
-
-        self._window.add(measured_at, temperature_c)
-        slope = self._window.slope_c_per_min()
-        rate_exceeded = slope is not None and slope > self._rules.rate_limit_c_per_min
-        if rate_exceeded:
-            self._last_rate_exceeded_at = measured_at
+        rate_exceeded = self._track(measured_at, temperature_c)
 
         if self._state in (AlertState.NORMAL, AlertState.RECOVERED):
             return self._evaluate_without_alert(
                 measured_at, temperature_c, rate_exceeded
             )
         return self._evaluate_open_alert(measured_at, temperature_c)
+
+    def _track(self, measured_at: datetime, temperature_c: float) -> bool:
+        """Takes a reading into the window and returns whether the rate is too high."""
+        self._last_measured_at = measured_at
+        self._window.add(measured_at, temperature_c)
+        slope = self._window.slope_c_per_min()
+        rate_exceeded = slope is not None and slope > self._rules.rate_limit_c_per_min
+        if rate_exceeded:
+            self._last_rate_exceeded_at = measured_at
+        return rate_exceeded
 
     def _evaluate_without_alert(
         self, measured_at: datetime, temperature_c: float, rate_exceeded: bool
