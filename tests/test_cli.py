@@ -26,3 +26,22 @@ def test_the_produce_command_takes_a_seed_a_duration_and_a_broker() -> None:
 def test_a_command_is_required() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args([])
+
+
+def test_the_process_command_has_defaults_for_every_option() -> None:
+    arguments = build_parser().parse_args(["process"])
+
+    assert arguments.bootstrap_servers == "localhost:9092"
+    assert (arguments.db_host, arguments.db_port) == ("localhost", 5432)
+
+
+def test_the_process_command_takes_a_broker_and_a_database() -> None:
+    arguments = build_parser().parse_args(
+        ["process", "--bootstrap-servers", "k:1", "--db-host", "db", "--db-port", "6"]
+    )
+
+    assert (arguments.bootstrap_servers, arguments.db_host, arguments.db_port) == (
+        "k:1",
+        "db",
+        6,
+    )
