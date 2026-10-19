@@ -42,7 +42,7 @@ gateway ..> tempTopic : publishes
 producer --> tempTopic : publishes readings\nkey: machine_id
 tempTopic --> processor : consumer group
 processor --> readings : insert, idempotent
-processor --> alerts : upsert by alert_id
+processor --> alerts : insert event,\nidempotent
 processor --> alertTopic : publishes alerts\nkey: machine_id
 readings --> hourly : aggregates
 readings --> grafana : SQL
