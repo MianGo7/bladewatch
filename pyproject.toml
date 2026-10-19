@@ -7,7 +7,10 @@ authors = [
   { name = "Mian Gohar Ehsan" },
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "confluent-kafka==2.16.0",
+    "numpy==2.5.4",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
