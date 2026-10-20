@@ -46,20 +46,21 @@ Grafana version 13.2.4.
 
 ## Demonstration scenario
 
-Scenario: `uv run python -m bladewatch scenario --reset --repetitions 1` with the seed 1.
-The machine `mould-01` runs normally for 100 seconds and then rises at 5 degrees Celsius
-per minute, the rate warning is raised 134 seconds after the start at 72.3 degrees Celsius,
-and the critical alert 396 seconds after the start at 95.3 degrees Celsius. The pictures
-were taken on 2026-10-20 with the Grafana version 13.2.4. The first picture was captured
-at the moment of the critical alert, about 12 seconds after the critical reading, with a
-page width of 1100 pixels. The two pictures of the history were captured after the end of
-the run with the range of the last 9 minutes, at a width of 900 pixels.
+Scenario: `uv run python -m bladewatch scenario --reset`, the third run of the measurement M4 on the
+commit 60af417 with the seed 1. The machine `mould-01` runs normally for 100 seconds and then
+rises at 5 degrees Celsius per minute, the rate warning is raised 134 seconds after the start at
+72.3 degrees Celsius, and the critical alert 396 seconds after the start at 95.3 degrees Celsius.
+The pictures were taken on 2026-10-20 with Grafana 13.2.4. The overview was captured 36 seconds
+after the critical reading, with the critical alert 0.151 seconds after its measurement in the
+database, at a page width of 1100 pixels. The chart of the moulds was captured at the same width
+and the table of alert events at 900 pixels, both after the end of the run with the range of the
+last 9 minutes.
 
 | File | View | Address after the base address | Size in pixels |
 | --- | --- | --- | --- |
-| `dashboard-overview-critical-alert-scenario.png` | The first screen at the moment of the critical alert: `mould-01` is critical in the state table, the alert is in the table of open alerts, and the line of the mould has crossed the critical threshold | `?orgId=1&from=now-10m&to=now&var-machine=mould-01&theme=light&kiosk&_dash.hideTimePicker&_dash.hideVariables` | 2200 by 1846 |
-| `dashboard-moulds-temperature-incident-scenario.png` | The course of the incident: four moulds, one of them rising from 70 degrees Celsius through the warning threshold of 80 and the critical threshold of 95 | `?orgId=1&from=now-9m&to=now&viewPanel=panel-2&theme=light&kiosk&_dash.hideTimePicker&_dash.hideVariables` | 1800 by 1060 |
-| `dashboard-alert-events-incident-scenario.png` | The two alert events of the incident, the rate of rise warning and the critical alert, with their times in UTC | `?orgId=1&from=now-9m&to=now&viewPanel=panel-6&theme=light&kiosk&_dash.hideTimePicker&_dash.hideVariables` | 1800 by 460 |
+| `dashboard-overview-critical-alert-scenario.png` | The first screen at the moment of the critical alert: `mould-01` is critical in the state table, the alert is in the table of open alerts, and the line of the mould has crossed the critical threshold | `?orgId=1&from=now-10m&to=now&var-machine=mould-01&theme=light&kiosk&_dash.hideTimePicker&_dash.hideVariables` | 2200 by 1848 |
+| `dashboard-moulds-temperature-incident-scenario.png` | The course of the incident: four moulds, one of them rising from 70 degrees Celsius through the warning threshold of 80 and the critical threshold of 95 | `?orgId=1&from=now-9m&to=now&viewPanel=panel-2&theme=light&kiosk&_dash.hideTimePicker&_dash.hideVariables` | 2200 by 1868 |
+| `dashboard-alert-events-incident-scenario.png` | The two alert events of the incident, the rate of rise warning and the critical alert, with their times in UTC | `?orgId=1&from=now-9m&to=now&viewPanel=panel-6&theme=light&kiosk&_dash.hideTimePicker&_dash.hideVariables` | 1800 by 560 |
 | `scenario-notification-output.txt` | The terminal output of the scenario with the notification of the contact point as the receiver logged it, cut to the lines of the start, the notification, and the end of the production | not a screenshot | text |
 | `m4-demonstration-scenario.md` | The results of the measurement M4 over three undisturbed runs, with the commit, the date, and the scenario | not a screenshot | table |
 
