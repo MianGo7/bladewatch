@@ -32,5 +32,9 @@ from `compose.yaml`.
   library and `config`, which a test checks, and `cli` is the only module that uses
   it, so that it appears in the component diagram of B9 below `cli` and above
   `config`.
+- The module `scenario` sits above the modules that it runs. It imports `producer`,
+  `processor`, `storage`, `notifier`, `sensor`, and `config`, and `cli` is the only
+  module that uses it, so that it appears in the component diagram of B9 below `cli`
+  and above these modules.
 - The state diagram of the alert is checked by a test: its arrows have to equal
   the allowed transitions in `src/bladewatch/rules.py`.
