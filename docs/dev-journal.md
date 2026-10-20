@@ -320,3 +320,86 @@ the continuous aggregate, and a Grafana alert rule with a contact point (A6). Th
 thresholds are not in the database yet, and the dashboard needs them, so a table or a
 view of the machines and their thresholds has to be decided there. The continuous
 integration run on GitHub is still outstanding.
+
+## 2026-10-20
+
+**Worked on.** B6, the dashboard and the alerting, with the screenshots of the dashboard in
+normal operation. In the
+database, the table `machines` and the views `open_alerts` and `machine_status`.
+In `storage` and `processor`, the registration of the machines with their thresholds
+at start. The dashboard `bladewatch.json` with a table of the state of every machine,
+one time series per machine type with the threshold lines, a table of the open
+alerts, a table of the alert events of the last 24 hours, and the hourly history of a
+selected machine from the continuous aggregate. The provisioned alert rule, contact
+point, and notification policy of Grafana, and the Compose settings for the refresh
+interval and the host name of the contact point. The new module `notifier`, a
+standard library webhook receiver, with the command `python -m bladewatch notify`. The
+architecture diagram and the sequence diagram show the notifier and the table
+`machines`. The stack was recreated from empty volumes with `docker compose down -v`,
+and the dashboard, the data source, the alert rule, the contact point, and the policy
+were all present after the start. Sixteen unit tests check the dashboard file, the
+compose file, and the provisioning against the configuration and against each other,
+eleven unit tests cover the notifier, and 12 integration tests cover the dashboard
+and the alerting.
+
+**Decisions.** ADR-0021 fixes the dashboard from views, with the machines registered by
+the processor so that the thresholds keep one source, and ADR-0022 fixes the webhook
+notification and the module `notifier`. The package structure of the architecture is
+extended by one leaf module that imports only the standard library and `config`, which
+a test checks. The new assumptions are A18, a refresh of the dashboard every second,
+and A19, an evaluation of the alert rule every 10 seconds. The colours are the first
+four slots of the validated categorical palette, one per machine number, checked with
+the validation script of the visualisation guidance: the worst adjacent separation for
+colour vision deficiency is 9.1, and aqua and yellow fall below 3:1 contrast on a light
+surface, which the legend with values and the status table compensate. The screenshots
+are captured at the full device resolution in four parts per picture with the page frozen,
+joined without scaling, and `docs/figures/README.md` lists the views, their addresses, and
+their sizes. FR6 and FR9 are marked done, and B6 is done.
+
+**Problems.** The dashboard was first seen rendered when the screenshots were prepared,
+and the view showed layout faults that the tests of the queries and of the file could not
+show. The state table was too short for its twelve rows and showed seven, the legends of
+the time series showed three of four machines, six columns of the table did not fit
+because Grafana gives a column a minimum width of 150 pixels, and the age of a reading
+appeared in milliseconds under a heading in seconds. The panels were enlarged, the tables
+were given a narrower minimum width, the type column was dropped, the open alerts were
+placed beside the state table so that the first screen fits into one window, and the unit
+of the age was changed. The window of the display allows 941 pixels in height, which is why
+the control bar is hidden in the pictures. An attempt to scale the page to fit it in
+distorted the layout and was dropped. The footer bar of Grafana overlapped the bottom of
+the panels, and the first attempt to hide it hid the whole page. The legend of the grinding
+machines still clips the descender of one line by about two pixels. The text for an empty table
+of open alerts was set with the option for the value of an empty field, `noValue`, and
+Grafana 13.2.4 loads it but still shows its own text "No data" for a table without rows,
+so the option has no visible effect there; a query that adds a row with the text when no
+alert is open would show it, at the cost of a row that is not data, and has not been done.
+The option and its test were removed again, because a setting without effect is dead
+configuration, and the panel keeps the text of Grafana.
+The history panel holds
+one point per hour, so after twenty minutes of data it shows two points per series and is of
+little use as a figure until hours of data exist. The first version of the panel tests
+guessed the shape of the frames that Grafana returns, which is one wide frame with a
+field per machine, and the test of the history panel used a window that started one
+minute before the data, so that the bucket, which is labelled with the start of its
+hour, was left out; the dashboard itself was correct in both cases. Moving the helpers
+of the integration tests into a shared module collided with a variable named `ticks`
+and with two names that had lost their imports. The first version of the receiver
+carried two lint suppressions, one of them for a rule that is not enabled, and the
+method that the server looks up by the name `do_POST` conflicts with the naming rule,
+so the handler class is built with the name as a string instead of disabling the rule.
+The machines that earlier test runs had registered stayed in the table, because only
+the tests of this item delete them; they were removed, and the environment of the tests
+now cleans that table. Grafana evaluates the alert rule only every 10 seconds, which
+bounds the notification delay from below, and a notification of a closing is slower
+because of the group interval.
+
+**Observation.** In one run of the command with a critical alert inserted into the
+database, the notification FIRING arrived 12 seconds later and RESOLVED followed the
+closing event after 20 seconds. These are single observations with the stack at its
+default settings and not measurements; M4 times the alert in the database and on the
+dashboard, and the notification is not part of it.
+
+**Next.** B7, the demonstration scenario: a command that runs the producer with the
+overheating of A16, the processor, and the dashboard, and the measurement M4. The
+screenshots of the dashboard at the critical alert, of the history afterwards, and of the
+terminal output of the notification belong there. The continuous integration run on GitHub is still outstanding.

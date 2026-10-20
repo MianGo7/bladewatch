@@ -136,7 +136,7 @@ Documents to update: `requirements.md`, `decision-log.md`, `dev-journal.md`.
 
 ## B6: Dashboard and alerting
 
-Status: open.
+Status: done.
 
 Scope: the Grafana dashboard as provisioned JSON: the current temperature of
 every machine with its thresholds, a time series per machine type, the table

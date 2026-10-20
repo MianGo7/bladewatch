@@ -808,3 +808,105 @@ assignment; the measurement M2 therefore uses one process. The processor stops o
 database error and relies on a supervisor to restart it, which Docker Compose would
 provide in a deployment and the prototype does not configure.
 
+
+## ADR-0021: Dashboard from views, machines registered by the processor
+
+Date: 2026-10-20. Status: accepted.
+
+**Context.** The dashboard shows the state of every machine with its thresholds
+(FR9), the temperature history, the open and recent alerts, and the hourly
+history of a selected machine from the continuous aggregate (FR8). The thresholds
+are defined once, in the configuration, and the dashboard needs them as data. The
+dashboard exists only as a file that is provisioned (ADR-0013).
+
+**Decision.** The processor writes the table `machines` with the type and the
+three temperatures of each machine whenever it starts, so that the configuration
+stays the only source. The dashboard reads two views of the schema and no logic of
+its own: `open_alerts`, the alerts without a closing event, and `machine_status`,
+the latest reading of every machine with its thresholds and the severity of its
+open alert, which is read through a lateral subquery that takes one row per machine
+from the index of the primary key. The dashboard has a table with the state of every
+machine, which is also written as text, one time series per machine type, a table of
+the open alerts, a table of the alert events of the last 24 hours, and a panel of
+the hourly minimum, mean, and maximum of the machine that a variable selects. The
+first screen holds the state table beside the table of open alerts, with the three
+time series below them, and the table of recent events and the hourly history sit
+below that. The state table has no column for the type of the machine, because the type
+is part of the name, and its columns are narrow, because Grafana gives a table column
+a minimum width of 150 pixels and six columns would otherwise not fit beside the table
+of open alerts. The dashboard refreshes every second (A18), and Grafana is configured to
+allow that. The
+lines of the warning and the critical threshold in the three time series panels are
+static values in the file, and a unit test compares them with the thresholds of the
+configuration, so that a change in one place fails the test until the other follows.
+The colours are the first four slots of the validated palette, one per machine
+number, so that a machine keeps its colour in all three panels, and the status
+colours are fixed for normal, warning, and critical and always accompanied by the
+word. The legend of the time series shows the last and the highest value, and the
+status table is the second route to the same information, because two of the four
+series colours fall below 3:1 contrast on a light surface.
+
+**Alternatives.** A table that is created by a script of the schema with the
+thresholds written out was rejected because it would hold a second copy that a test
+would have to guard against drift. Thresholds written into the queries of the
+dashboard were rejected for the same reason. A bar gauge per machine would show the
+distance to the thresholds but cannot take its thresholds from the data, which is why
+the table carries the thresholds as columns. Queries against the base tables with
+their joins in the dashboard were rejected, because what counts as open or current
+should be defined in the schema and be testable there. A refresh interval of five
+seconds, the default lower limit, was rejected because the dashboard would then add up
+to five seconds to the latency of an alert that A5 puts at five seconds in total.
+
+**Consequences.** The dashboard shows machines only after the processor has started
+once, which is the order of the demonstration. A machine that is removed from the
+configuration stays in the table until it is deleted by hand. The dashboard polls with
+seven queries per second, which is negligible at twelve machines and has not been
+measured at the load of M2. The schema scripts run on an empty volume only, so the new
+objects exist after `docker compose down -v`. The dashboard file is the artefact; a
+change made in the browser has to be exported back into it. Grafana converts the
+series of a type into one wide frame, which the tests account for. The layout was
+corrected after the first rendering: the state table had been too short for its twelve
+rows and the legends of the time series too short for four machines, which no test of
+the file or of the queries could show.
+
+## ADR-0022: Webhook notification through a module of the package
+
+Date: 2026-10-20. Status: accepted.
+
+**Context.** A critical alert has to reach an employee outside the dashboard (FR6),
+and assumption A6 fixes the channel as a contact point of Grafana that posts to a local
+web hook, without a real e-mail or text message. Something has to receive the post, and
+the notification has to be visible on the terminal of the demonstration.
+
+**Decision.** The alert rule, the contact point, and the notification policy of Grafana
+are provisioned from files. The rule selects the machines of the view `open_alerts` with
+a critical alert, is evaluated every 10 seconds without a pending period (A19), and
+labels each instance with the machine. The policy notifies a new alert at once and a
+further alert of the group within 10 seconds, and repeats after an hour. The contact
+point posts to `http://host.docker.internal:8089/notify`, and the Compose file gives the
+Grafana container that name for Linux hosts as well. The receiver is a new module of the
+package, `notifier`, started with `python -m bladewatch notify`. It uses only the
+standard library, it listens on the loopback address, it accepts a post to one path of
+at most one mebibyte, and it writes one line per alert to the log. The module imports
+the standard library and `config` only, and a test checks this. The dependency direction
+of the package is extended by one leaf: `cli` uses `notifier`, and `notifier` uses
+`config`.
+
+**Alternatives.** A script outside the package was rejected because it would be code
+that the test suite and the component diagram do not cover. A container for the receiver
+was rejected because it adds an image that no backlog item names and a second place for
+code. An e-mail contact point needs an SMTP server, which is another container and is
+rejected for the reason of A6. A receiver built on a web framework was rejected because
+it adds a dependency for a single route.
+
+**Consequences.** The receiver has no authentication and is reachable from this machine
+only; it must not listen on a public address without one. On Linux the container reaches
+the host through the bridge and not through the loopback address, so the receiver has to
+be started with `--host 0.0.0.0` there, which exposes it to the network of the host. The
+notification of a new alert is delayed by up to the evaluation interval, and the
+notification of a closing by up to the evaluation interval plus the group interval. In
+one run of the command, a notification followed an alert in the database after 12
+seconds and the resolution followed the closing after 20 seconds; these are single
+observations. The alert rule reads the view and not the topic, so a notification
+depends on the database and on the processor having stored the alert. The terminal output
+of a received critical notification is a figure for the demonstration of B7.

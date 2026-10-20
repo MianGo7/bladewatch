@@ -38,6 +38,18 @@ for a clean start.
 All ports are bound to the loopback interface, and the credentials are
 development defaults that protect nothing beyond the machine they run on.
 
+## Dashboard and notification
+
+The dashboard is provisioned from `infra/grafana/dashboards/bladewatch.json` and
+is at
+`http://localhost:3000/d/bladewatch-overview/bladewatch-machine-monitoring`. It
+shows data once the processor has run, because the processor writes the machines
+and their thresholds to the database when it starts. A critical alert is also sent
+by the contact point of Grafana to a web hook on port 8089. The receiver is started
+with `uv run python -m bladewatch notify` and writes each notification to the
+terminal; on a Linux host it has to be started with `--host 0.0.0.0` so that the
+container can reach it.
+
 ## Tools and licences
 
 | Tool | Version | Licence |
@@ -72,6 +84,7 @@ with Compose.
     uv run python -m bladewatch --help        # the entry points
     uv run python -m bladewatch produce --duration-s 60   # publish readings for a minute
     uv run python -m bladewatch process       # consume, apply the rules, store
+    uv run python -m bladewatch notify        # receive and log Grafana notifications
 
 The tests marked `integration` need the running container stack and are run
 with `uv run pytest -m integration`. Continuous integration runs the format
