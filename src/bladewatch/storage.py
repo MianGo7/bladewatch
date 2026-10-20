@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 import psycopg
 from psycopg.conninfo import make_conninfo
@@ -76,6 +76,48 @@ ON CONFLICT (machine_id) DO UPDATE SET
     warning_c = EXCLUDED.warning_c,
     critical_c = EXCLUDED.critical_c
 """
+
+
+_COUNT_ROWS = """
+SELECT
+    (SELECT count(*) FROM readings WHERE machine_id = ANY(%(ids)s)),
+    (SELECT count(*) FROM alerts WHERE machine_id = ANY(%(ids)s)),
+    (SELECT count(*) FROM machines WHERE machine_id = ANY(%(ids)s))
+"""
+
+_ALERT_EVENTS = """
+SELECT a.alert_id, a.kind, a.severity, a.status, a.temperature_c, a."limit",
+       a.measured_at, r.kafka_appended_at, a.processed_at, a.stored_at
+FROM alerts AS a
+LEFT JOIN readings AS r
+    ON r.machine_id = a.machine_id AND r.measured_at = a.measured_at
+WHERE a.machine_id = %s
+ORDER BY a.measured_at, a.stored_at
+"""
+
+# One expression per stage, each the time between two stage timestamps.
+_STAGES = {
+    "measured to broker": "kafka_appended_at - measured_at",
+    "broker to processor": "processed_at - kafka_appended_at",
+    "processor to stored": "stored_at - processed_at",
+    "measured to stored": "stored_at - measured_at",
+}
+
+
+def _stage_query() -> str:
+    columns = []
+    for expression in _STAGES.values():
+        seconds = f"extract(epoch FROM {expression})"
+        columns.append(
+            f"percentile_cont(0.5) WITHIN GROUP (ORDER BY {seconds}), "
+            f"percentile_cont(0.95) WITHIN GROUP (ORDER BY {seconds}), "
+            f"max({seconds})"
+        )
+    return (
+        "SELECT count(*), "
+        + ", ".join(columns)
+        + " FROM readings WHERE machine_id = ANY(%(ids)s)"
+    )
 
 
 class StorageError(RuntimeError):
@@ -165,6 +207,64 @@ class MachineRow:
     normal_c: float
     warning_c: float
     critical_c: float
+
+
+@dataclass(frozen=True, slots=True)
+class AlertEventRow:
+    """A stored alert event with the stage timestamps of its reading.
+
+    Attributes:
+        alert_id: Identifier of the alert.
+        kind: `threshold` or `rate_of_rise`.
+        severity: `warning` or `critical`.
+        status: `raised` or `closed`.
+        temperature_c: Temperature of the reading that caused the event.
+        limit: Threshold or rate limit.
+        measured_at: Time of measurement of that reading.
+        kafka_appended_at: Time at which the broker appended the reading, or None
+            if the reading is not stored.
+        processed_at: Time at which the processor evaluated it.
+        stored_at: Time at which the database stored the event.
+    """
+
+    alert_id: str
+    kind: str
+    severity: str
+    status: str
+    temperature_c: float
+    limit: float
+    measured_at: datetime
+    kafka_appended_at: datetime | None
+    processed_at: datetime
+    stored_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class StageStats:
+    """The distribution of the time that one stage took, in seconds.
+
+    Attributes:
+        median_s: Median.
+        p95_s: 95th percentile.
+        maximum_s: Maximum.
+    """
+
+    median_s: float
+    p95_s: float
+    maximum_s: float
+
+
+@dataclass(frozen=True, slots=True)
+class LatencySummary:
+    """The latency of every stage over the stored readings of some machines.
+
+    Attributes:
+        readings: Number of readings.
+        stages: Statistics by the name of the stage, empty without readings.
+    """
+
+    readings: int
+    stages: dict[str, StageStats]
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,6 +420,83 @@ class Storage:
                     )
         except psycopg.Error as error:
             raise StorageError(f"machines could not be written: {error}") from error
+
+    def count_rows(self, machine_ids: Sequence[str]) -> dict[str, int]:
+        """Counts the rows of readings, alerts, and machines of some machines.
+
+        Args:
+            machine_ids: The machines to count.
+        """
+        rows = self._fetch(_COUNT_ROWS, {"ids": list(machine_ids)})
+        readings, alerts, machines = rows[0]
+        return {"readings": readings, "alerts": alerts, "machines": machines}
+
+    def clear_machines(self, machine_ids: Sequence[str]) -> None:
+        """Deletes the readings, alerts, and machine rows of some machines.
+
+        Only the named machines are touched. The hourly aggregate is refreshed
+        afterwards, so that no bucket of deleted readings remains.
+
+        Args:
+            machine_ids: The machines to clear.
+
+        Raises:
+            StorageError: If a statement fails.
+        """
+        connection = self._require_connection()
+        ids = list(machine_ids)
+        try:
+            with connection.transaction(), connection.cursor() as cursor:
+                for table in ("readings", "alerts", "machines"):
+                    cursor.execute(
+                        f"DELETE FROM {table} WHERE machine_id = ANY(%s)", (ids,)
+                    )
+            # A refresh of a continuous aggregate cannot run in a transaction.
+            connection.autocommit = True
+            try:
+                connection.execute(
+                    "CALL refresh_continuous_aggregate('readings_hourly', NULL, NULL)"
+                )
+            finally:
+                connection.autocommit = False
+        except psycopg.Error as error:
+            raise StorageError(f"machines could not be cleared: {error}") from error
+
+    def alert_events(self, machine_id: str) -> list[AlertEventRow]:
+        """Returns the alert events of a machine with their stage timestamps.
+
+        Args:
+            machine_id: Identifier of the machine.
+        """
+        rows = self._fetch(_ALERT_EVENTS, (machine_id,))
+        return [AlertEventRow(*row) for row in rows]
+
+    def stage_latencies(self, machine_ids: Sequence[str]) -> LatencySummary:
+        """Summarises the time of every stage over the stored readings.
+
+        Args:
+            machine_ids: The machines whose readings are summarised.
+        """
+        (row,) = self._fetch(_stage_query(), {"ids": list(machine_ids)})
+        readings = row[0]
+        if readings == 0:
+            return LatencySummary(0, {})
+        stages = {}
+        for index, name in enumerate(_STAGES):
+            median, p95, maximum = row[1 + 3 * index : 4 + 3 * index]
+            stages[name] = StageStats(float(median), float(p95), float(maximum))
+        return LatencySummary(readings, stages)
+
+    def _fetch(self, statement: str, parameters: object) -> list[tuple[Any, ...]]:
+        connection = self._require_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(statement, parameters)
+                rows = cursor.fetchall()
+            connection.commit()
+        except psycopg.Error as error:
+            raise StorageError(f"the query failed: {error}") from error
+        return rows
 
     def recent_readings(
         self, machine_id: str, span_s: float

@@ -7,6 +7,7 @@ import pytest
 from bladewatch.config import DatabaseSettings
 from bladewatch.storage import (
     AlertRow,
+    MachineRow,
     ReadingRow,
     Storage,
     StorageError,
@@ -27,6 +28,7 @@ def prefix() -> Iterator[str]:
     finally:
         sql(f"DELETE FROM readings WHERE machine_id LIKE '{name}%'")
         sql(f"DELETE FROM alerts WHERE machine_id LIKE '{name}%'")
+        sql(f"DELETE FROM machines WHERE machine_id LIKE '{name}%'")
 
 
 @pytest.fixture
@@ -227,3 +229,97 @@ def test_a_database_that_is_not_reachable_reports_an_error() -> None:
 
     with pytest.raises(StorageError, match="cannot connect"):
         unreachable.connect()
+
+
+def _machine_row(machine: str) -> MachineRow:
+    return MachineRow(machine, "mould", 70.0, 80.0, 95.0)
+
+
+def test_row_counts_are_limited_to_the_named_machines(
+    prefix: str, storage: Storage
+) -> None:
+    ours, other = f"{prefix}-mould", f"{prefix}-oven"
+    storage.register_machines([_machine_row(ours), _machine_row(other)])
+    storage.store_batch(
+        [_reading(ours, n) for n in range(4)] + [_reading(other, 0)],
+        [_alert(ours, f"{ours}:threshold:a")],
+    )
+
+    counts = storage.count_rows([ours])
+
+    assert counts == {"readings": 4, "alerts": 1, "machines": 1}
+
+
+def test_clearing_machines_removes_only_their_rows(
+    prefix: str, storage: Storage
+) -> None:
+    ours, other = f"{prefix}-mould", f"{prefix}-oven"
+    storage.register_machines([_machine_row(ours), _machine_row(other)])
+    storage.store_batch(
+        [_reading(ours, 0), _reading(other, 0)],
+        [_alert(ours, f"{ours}:threshold:a"), _alert(other, f"{other}:threshold:a")],
+    )
+
+    storage.clear_machines([ours])
+
+    assert storage.count_rows([ours]) == {"readings": 0, "alerts": 0, "machines": 0}
+    assert storage.count_rows([other]) == {"readings": 1, "alerts": 1, "machines": 1}
+
+
+def test_clearing_machines_removes_their_hourly_aggregate_as_well(
+    prefix: str, storage: Storage
+) -> None:
+    machine = f"{prefix}-mould"
+    storage.store_batch([_reading(machine, n) for n in range(10)], [])
+    sql("CALL refresh_continuous_aggregate('readings_hourly', NULL, NULL)")
+    assert sql(f"SELECT count(*) FROM readings_hourly WHERE machine_id = '{machine}'")
+
+    storage.clear_machines([machine])
+
+    assert sql(
+        f"SELECT count(*) FROM readings_hourly WHERE machine_id = '{machine}'"
+    ) == [["0"]]
+
+
+def test_alert_events_carry_the_stage_timestamps_of_their_reading(
+    prefix: str, storage: Storage
+) -> None:
+    machine = f"{prefix}-mould"
+    alert_id = f"{machine}:threshold:a"
+    reading = _reading(machine, 5, 81.0)
+    storage.store_batch([reading], [_alert(machine, alert_id, second=5)])
+
+    (event,) = storage.alert_events(machine)
+
+    assert event.alert_id == alert_id
+    assert event.kafka_appended_at == reading.kafka_appended_at
+    assert event.measured_at <= event.processed_at <= event.stored_at
+
+
+def test_the_latency_summary_covers_every_stage_of_the_stored_readings(
+    prefix: str, storage: Storage
+) -> None:
+    machine = f"{prefix}-mould"
+    storage.store_batch([_reading(machine, n) for n in range(20)], [])
+
+    summary = storage.stage_latencies([machine])
+
+    assert summary.readings == 20
+    # The helper gives every reading 5 ms to the broker and a further 15 ms to
+    # the processor, and the database adds the delay of the insert.
+    assert summary.stages["measured to broker"].median_s == pytest.approx(
+        0.005, abs=1e-6
+    )
+    assert summary.stages["broker to processor"].median_s == pytest.approx(
+        0.015, abs=1e-6
+    )
+    assert summary.stages["measured to stored"].maximum_s >= 0.02
+
+
+def test_the_latency_summary_of_machines_without_readings_is_empty(
+    prefix: str, storage: Storage
+) -> None:
+    summary = storage.stage_latencies([f"{prefix}-none"])
+
+    assert summary.readings == 0
+    assert summary.stages == {}
