@@ -11,13 +11,22 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
 
+from bladewatch.bench.latency import M1_DURATION_S
+from bladewatch.bench.run import measure_faults, measure_latency, measure_throughput
 from bladewatch.config import (
     DatabaseSettings,
+    FaultSettings,
     KafkaSettings,
     NotifierSettings,
+    PlantSettings,
+    ProcessorSettings,
     ScenarioSettings,
+    ThroughputSettings,
     default_plant,
+    scaled_plant,
 )
+from bladewatch.measure import MeasureError
+from bladewatch.measure.render import render
 from bladewatch.notifier import NotificationServer
 from bladewatch.processor import (
     ProcessorError,
@@ -69,6 +78,13 @@ def build_parser() -> argparse.ArgumentParser:
         "it is interrupted",
     )
     produce.add_argument(
+        "--machines",
+        type=int,
+        default=None,
+        help="number of streams of the load measurements, one reading per second "
+        "each; without it the twelve machines of the plant publish",
+    )
+    produce.add_argument(
         "--bootstrap-servers",
         default=KafkaSettings().bootstrap_servers,
         help="address of the Kafka broker, host and port",
@@ -82,6 +98,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--bootstrap-servers",
         default=KafkaSettings().bootstrap_servers,
         help="address of the Kafka broker, host and port",
+    )
+    process.add_argument(
+        "--machines",
+        type=int,
+        default=None,
+        help="number of streams of the load measurements; it has to equal the "
+        "number of the producer",
+    )
+    process.add_argument(
+        "--group",
+        default=ProcessorSettings().consumer_group,
+        help="Kafka consumer group of the processor",
     )
     process.add_argument(
         "--db-host",
@@ -145,12 +173,96 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("results"),
         help="directory for the results of the measurement M4",
     )
+
+    measure = commands.add_parser(
+        "measure",
+        help="run the measurements M1 to M3 or render their tables and figures",
+    )
+    kinds = measure.add_subparsers(dest="measurement", required=True)
+    defaults = ThroughputSettings(), FaultSettings()
+
+    def common(command: argparse.ArgumentParser) -> None:
+        command.add_argument(
+            "--reset",
+            action="store_true",
+            help="delete the data of earlier runs from the topics and the tables "
+            "first; without it the measurement refuses to start on a stack that "
+            "holds data",
+        )
+        command.add_argument(
+            "--output-dir",
+            type=Path,
+            default=Path("results"),
+            help="directory for the raw results",
+        )
+        command.add_argument(
+            "--repetitions", type=int, default=None, help="number of runs"
+        )
+        command.add_argument(
+            "--seed", type=int, default=_DEFAULT_SEED, help="seed of the simulation"
+        )
+
+    latency = kinds.add_parser("latency", help="M1, the latency of every stage")
+    common(latency)
+    latency.add_argument(
+        "--duration-s", type=float, default=M1_DURATION_S, help="seconds per run"
+    )
+    throughput = kinds.add_parser("throughput", help="M2, the ramp of load steps")
+    common(throughput)
+    throughput.add_argument(
+        "--steps",
+        type=_steps,
+        default=defaults[0].steps,
+        help="offered readings per second of each step, separated by commas",
+    )
+    throughput.add_argument(
+        "--step-duration-s",
+        type=float,
+        default=defaults[0].step_duration_s,
+        help="seconds of load per step",
+    )
+    faults = kinds.add_parser(
+        "faults", help="M3, the processor is stopped and started again"
+    )
+    common(faults)
+    faults.add_argument(
+        "--streams",
+        type=int,
+        default=defaults[1].streams,
+        help="offered readings per second",
+    )
+    figures = kinds.add_parser(
+        "figures", help="render the table and the figure of a raw result"
+    )
+    figures.add_argument("result", type=Path, help="the JSON file of a measurement")
+    figures.add_argument(
+        "--figures-dir",
+        type=Path,
+        default=Path("docs/figures"),
+        help="directory for the table and the figure",
+    )
     return parser
 
 
-def _produce(seed: int, duration_s: float | None, bootstrap_servers: str) -> int:
+def _steps(text: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in text.split(","))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"not a list of integers: {text}") from error
+
+
+def _plant(machines: int | None) -> PlantSettings:
+    return default_plant() if machines is None else scaled_plant(machines)
+
+
+def _produce(
+    seed: int,
+    duration_s: float | None,
+    bootstrap_servers: str,
+    machines: int | None = None,
+) -> int:
     plant = dataclasses.replace(
-        default_plant(), kafka=KafkaSettings(bootstrap_servers=bootstrap_servers)
+        _plant(machines), kafka=KafkaSettings(bootstrap_servers=bootstrap_servers)
     )
     publisher = ReadingPublisher(
         create_kafka_producer(plant.kafka), plant.topics.readings
@@ -173,11 +285,18 @@ def _produce(seed: int, duration_s: float | None, bootstrap_servers: str) -> int
     return 0
 
 
-def _process(bootstrap_servers: str, db_host: str, db_port: int) -> int:
+def _process(
+    bootstrap_servers: str,
+    db_host: str,
+    db_port: int,
+    machines: int | None = None,
+    group: str = ProcessorSettings().consumer_group,
+) -> int:
     plant = dataclasses.replace(
-        default_plant(),
+        _plant(machines),
         kafka=KafkaSettings(bootstrap_servers=bootstrap_servers),
         database=DatabaseSettings(host=db_host, port=db_port),
+        processor=ProcessorSettings(consumer_group=group),
     )
     stop = threading.Event()
 
@@ -243,6 +362,54 @@ def _scenario(
     return 0
 
 
+def _measure(arguments: argparse.Namespace) -> int:
+    plant = default_plant()
+    try:
+        if arguments.measurement == "figures":
+            for path in render(arguments.result, arguments.figures_dir):
+                logger.info("written %s", path)
+            return 0
+        if arguments.measurement == "latency":
+            measure_latency(
+                plant,
+                arguments.seed,
+                arguments.repetitions or ScenarioSettings().repetitions,
+                arguments.duration_s,
+                arguments.reset,
+                arguments.output_dir,
+            )
+        elif arguments.measurement == "throughput":
+            measure_throughput(
+                plant,
+                dataclasses.replace(
+                    ThroughputSettings(),
+                    steps=arguments.steps,
+                    step_duration_s=arguments.step_duration_s,
+                    seed=arguments.seed,
+                    repetitions=arguments.repetitions
+                    or ThroughputSettings().repetitions,
+                ),
+                arguments.reset,
+                arguments.output_dir,
+            )
+        else:
+            measure_faults(
+                plant,
+                dataclasses.replace(
+                    FaultSettings(),
+                    streams=arguments.streams,
+                    seed=arguments.seed,
+                    repetitions=arguments.repetitions or FaultSettings().repetitions,
+                ),
+                arguments.reset,
+                arguments.output_dir,
+            )
+    except (MeasureError, ScenarioError, StorageError, ProcessorError) as error:
+        logger.error("%s", error)
+        return 2
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Runs the command line and returns the exit status.
 
@@ -257,11 +424,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if arguments.command == "produce":
         return _produce(
-            arguments.seed, arguments.duration_s, arguments.bootstrap_servers
+            arguments.seed,
+            arguments.duration_s,
+            arguments.bootstrap_servers,
+            arguments.machines,
         )
     if arguments.command == "process":
         return _process(
-            arguments.bootstrap_servers, arguments.db_host, arguments.db_port
+            arguments.bootstrap_servers,
+            arguments.db_host,
+            arguments.db_port,
+            arguments.machines,
+            arguments.group,
         )
     if arguments.command == "notify":
         return _notify(arguments.host, arguments.port)
@@ -273,4 +447,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             arguments.fast,
             arguments.output_dir,
         )
+    if arguments.command == "measure":
+        return _measure(arguments)
     raise AssertionError(f"unhandled command {arguments.command}")
