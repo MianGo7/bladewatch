@@ -1,0 +1,3 @@
+2026-10-20 13:57:11,157 INFO bladewatch.scenario: scenario started with the seed 1
+2026-10-20 14:03:50,018 WARNING bladewatch.notifier: NOTIFICATION FIRING    critical  mould-01  Machine mould-01 has a critical alert (since 2026-10-20T12:03:50Z)
+2026-10-20 14:04:50,166 INFO bladewatch.producer: published 460 ticks, 5520 readings delivered
