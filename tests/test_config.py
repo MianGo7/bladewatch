@@ -8,6 +8,7 @@ from bladewatch.config import (
     MOULD,
     OVEN,
     DatabaseSettings,
+    FaultSettings,
     GrafanaSettings,
     KafkaSettings,
     Machine,
@@ -18,8 +19,10 @@ from bladewatch.config import (
     RuleSettings,
     ScenarioSettings,
     SensorSettings,
+    ThroughputSettings,
     TopicSettings,
     default_plant,
+    scaled_plant,
 )
 
 
@@ -191,6 +194,16 @@ def test_the_default_processor_settings_are_those_of_assumption_a17() -> None:
     assert (processor.batch_size, processor.poll_timeout_s) == (500, 0.2)
 
 
+def test_the_default_session_timeout_is_the_45_seconds_of_assumption_a25() -> None:
+    assert ProcessorSettings().session_timeout_ms == 45000
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_processor_settings_require_a_positive_session_timeout(value: int) -> None:
+    with pytest.raises(ValueError, match="session_timeout_ms"):
+        ProcessorSettings(session_timeout_ms=value)
+
+
 def test_processor_settings_require_a_consumer_group() -> None:
     with pytest.raises(ValueError, match="consumer_group"):
         ProcessorSettings(consumer_group="")
@@ -287,3 +300,100 @@ def test_the_default_grafana_settings_are_the_development_credentials() -> None:
 def test_grafana_settings_require_an_address() -> None:
     with pytest.raises(ValueError, match="base_url"):
         GrafanaSettings(base_url="")
+
+
+def test_the_default_steps_are_those_of_assumption_a9() -> None:
+    assert ThroughputSettings().steps == (
+        12,
+        100,
+        500,
+        2000,
+        5000,
+        10000,
+        25000,
+        50000,
+        100000,
+    )
+
+
+def test_throughput_steps_must_ascend_without_repeats() -> None:
+    with pytest.raises(ValueError, match="ascending"):
+        ThroughputSettings(steps=(100, 12))
+    with pytest.raises(ValueError, match="ascending"):
+        ThroughputSettings(steps=(12, 12))
+
+
+def test_throughput_settings_reject_a_step_below_one() -> None:
+    with pytest.raises(ValueError, match="steps"):
+        ThroughputSettings(steps=(0, 12))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "step_duration_s",
+        "latency_target_s",
+        "lag_growth_fraction",
+        "lag_window_s",
+        "drain_timeout_s",
+    ],
+)
+@pytest.mark.parametrize("value", [0.0, -1.0, math.nan, math.inf])
+def test_throughput_settings_require_positive_finite_values(
+    name: str, value: float
+) -> None:
+    with pytest.raises(ValueError, match=name):
+        ThroughputSettings(**{name: value})
+
+
+def test_the_generator_tolerance_is_a_fraction() -> None:
+    with pytest.raises(ValueError, match="generator_tolerance"):
+        ThroughputSettings(generator_tolerance=1.5)
+
+
+def test_the_fault_measurement_uses_the_reference_load_of_assumption_a9() -> None:
+    assert FaultSettings().streams == 2000
+
+
+def test_the_load_of_the_fault_measurement_is_the_sum_of_its_phases() -> None:
+    settings = FaultSettings(warm_s=10.0, outage_s=20.0, recovery_s=30.0)
+
+    assert settings.load_s == 60.0
+
+
+def test_fault_settings_require_a_stream_and_a_repetition() -> None:
+    with pytest.raises(ValueError, match="streams"):
+        FaultSettings(streams=0)
+    with pytest.raises(ValueError, match="repetitions"):
+        FaultSettings(repetitions=0)
+
+
+@pytest.mark.parametrize("name", ["warm_s", "outage_s", "recovery_s"])
+def test_fault_settings_require_positive_phases(name: str) -> None:
+    with pytest.raises(ValueError, match=name):
+        FaultSettings(**{name: 0.0})
+
+
+def test_a_scaled_plant_has_one_machine_per_stream() -> None:
+    plant = scaled_plant(2000)
+
+    assert len(plant.machines) == 2000
+    assert plant.machines[0].machine_id == "load-0000"
+    assert plant.machines[-1].machine_id == "load-1999"
+
+
+def test_a_scaled_plant_rotates_the_machine_types() -> None:
+    types = [machine.machine_type for machine in scaled_plant(7).machines]
+
+    assert types == [MOULD, OVEN, GRINDER, MOULD, OVEN, GRINDER, MOULD]
+
+
+def test_the_identifiers_of_a_scaled_plant_sort_in_stream_order() -> None:
+    identifiers = [machine.machine_id for machine in scaled_plant(120).machines]
+
+    assert identifiers == sorted(identifiers)
+
+
+def test_a_scaled_plant_needs_a_stream() -> None:
+    with pytest.raises(ValueError, match="streams"):
+        scaled_plant(0)

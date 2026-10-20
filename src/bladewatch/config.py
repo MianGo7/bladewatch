@@ -202,11 +202,16 @@ class ProcessorSettings:
         poll_timeout_s: Longest wait for a full batch in seconds (A17). A
             partial batch is processed when it expires, so the value is the
             largest delay that batching adds to the latency.
+        session_timeout_ms: Time in milliseconds after which the broker removes a
+            group member that sends no heartbeat (A25). The value is the default of
+            the client, stated here so that the time that a group needs to notice a
+            killed processor is a setting and not an assumption.
     """
 
     consumer_group: str = "bladewatch-processor"
     batch_size: int = 500
     poll_timeout_s: float = 0.2
+    session_timeout_ms: int = 45000
 
     def __post_init__(self) -> None:
         """Validates the group and the batch parameters."""
@@ -221,6 +226,11 @@ class ProcessorSettings:
             raise ValueError(
                 "ProcessorSettings: poll_timeout_s must be positive, "
                 f"got {self.poll_timeout_s}"
+            )
+        if self.session_timeout_ms < 1:
+            raise ValueError(
+                "ProcessorSettings: session_timeout_ms must be positive, "
+                f"got {self.session_timeout_ms}"
             )
 
 
@@ -310,6 +320,103 @@ class ScenarioSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ThroughputSettings:
+    """The load steps of the throughput measurement M2 (A9, A21, A22).
+
+    Attributes:
+        steps: Offered readings per second of each step, ascending. Every
+            reading comes from a stream of its own with one reading per second,
+            so a step of 2,000 readings per second has 2,000 streams.
+        step_duration_s: Time in seconds for which a step offers its load.
+        repetitions: Number of times the whole ramp is run.
+        seed: Seed of the simulation. Equal seeds give equal readings.
+        latency_target_s: The target of A5 in seconds, applied to the 95th
+            percentile of the time from measurement to storage of a step.
+        lag_growth_fraction: A step accumulates lag continuously when the floor of
+            the lag gains more than this fraction of the offered rate per second
+            over the second half of the step.
+        lag_window_s: Length in seconds of the stretches whose smallest lag forms
+            the floor of the lag.
+        generator_tolerance: A step counts as generator limited when the
+            producer delivers less than this fraction of the offered load.
+        drain_timeout_s: Longest wait in seconds for the lag to reach zero
+            after the load of a step has stopped.
+    """
+
+    steps: tuple[int, ...] = (12, 100, 500, 2000, 5000, 10000, 25000, 50000, 100000)
+    step_duration_s: float = 120.0
+    repetitions: int = 3
+    seed: int = 1
+    latency_target_s: float = 5.0
+    lag_growth_fraction: float = 0.01
+    lag_window_s: float = 5.0
+    generator_tolerance: float = 0.95
+    drain_timeout_s: float = 300.0
+
+    def __post_init__(self) -> None:
+        """Validates the steps, the duration, and the criteria."""
+        if not self.steps or any(step < 1 for step in self.steps):
+            raise ValueError("ThroughputSettings: steps must be positive integers")
+        if list(self.steps) != sorted(set(self.steps)):
+            raise ValueError("ThroughputSettings: steps must be strictly ascending")
+        if self.repetitions < 1:
+            raise ValueError("ThroughputSettings: repetitions must be at least 1")
+        for name in (
+            "step_duration_s",
+            "latency_target_s",
+            "lag_growth_fraction",
+            "lag_window_s",
+            "generator_tolerance",
+            "drain_timeout_s",
+        ):
+            value = getattr(self, name)
+            if not (math.isfinite(value) and value > 0.0):
+                raise ValueError(f"ThroughputSettings: {name} must be positive")
+        if self.generator_tolerance > 1.0:
+            raise ValueError("ThroughputSettings: generator_tolerance is at most 1")
+
+
+@dataclass(frozen=True, slots=True)
+class FaultSettings:
+    """The fault tolerance measurement M3, a processor that is stopped (A23).
+
+    Attributes:
+        streams: Number of streams, which is the offered readings per second.
+        warm_s: Seconds of load before the processor is stopped.
+        outage_s: Seconds during which the processor is down and the load goes on.
+        recovery_s: Seconds of load after the processor was started again.
+        repetitions: Number of runs of each kind of stop.
+        seed: Seed of the simulation. Equal seeds give equal readings.
+        drain_timeout_s: Longest wait in seconds for the lag to reach zero after
+            the load has stopped.
+    """
+
+    streams: int = 2000
+    warm_s: float = 30.0
+    outage_s: float = 30.0
+    recovery_s: float = 60.0
+    repetitions: int = 3
+    seed: int = 1
+    drain_timeout_s: float = 300.0
+
+    def __post_init__(self) -> None:
+        """Validates the load and the timeline."""
+        if self.streams < 1:
+            raise ValueError("FaultSettings: streams must be at least 1")
+        if self.repetitions < 1:
+            raise ValueError("FaultSettings: repetitions must be at least 1")
+        for name in ("warm_s", "outage_s", "recovery_s", "drain_timeout_s"):
+            value = getattr(self, name)
+            if not (math.isfinite(value) and value > 0.0):
+                raise ValueError(f"FaultSettings: {name} must be positive")
+
+    @property
+    def load_s(self) -> float:
+        """Returns the length of the load in seconds."""
+        return self.warm_s + self.outage_s + self.recovery_s
+
+
+@dataclass(frozen=True, slots=True)
 class PlantSettings:
     """The monitored plant: its machines, its sensors, its topics, and Kafka.
 
@@ -360,5 +467,29 @@ def default_plant() -> PlantSettings:
         Machine(f"{machine_type.name}-{index:02d}", machine_type)
         for machine_type in (MOULD, OVEN, GRINDER)
         for index in range(1, 5)
+    )
+    return PlantSettings(machines=machines)
+
+
+def scaled_plant(streams: int) -> PlantSettings:
+    """Returns a plant with one stream per machine for the load measurements.
+
+    The message format carries a machine identifier and no sensor identifier
+    (A2), so the load of A9 is produced as one stream per sensor. The types
+    rotate, so that every type is represented at every size (A21).
+
+    Args:
+        streams: Number of streams, one reading per second each.
+
+    Raises:
+        ValueError: If there is no stream.
+    """
+    if streams < 1:
+        raise ValueError("scaled_plant: streams must be at least 1")
+    types = (MOULD, OVEN, GRINDER)
+    width = len(str(streams))
+    machines = tuple(
+        Machine(f"load-{index:0{width}d}", types[index % len(types)])
+        for index in range(streams)
     )
     return PlantSettings(machines=machines)
