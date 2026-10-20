@@ -1,6 +1,8 @@
+import base64
 import json
 import socket
 import subprocess
+import urllib.request
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
@@ -59,3 +61,23 @@ def delete_consumer_group(group_id: str) -> None:
         group_id,
         check=False,
     )
+
+
+def grafana(
+    path: str, body: dict[str, object] | None = None
+) -> dict[str, object] | list[object]:
+    """Calls the Grafana HTTP interface with the development credentials.
+
+    A request with a body is a POST, and one without is a GET.
+    """
+    credentials = base64.b64encode(b"admin:bladewatch").decode()
+    headers = {"Authorization": f"Basic {credentials}"}
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        f"http://localhost:3000{path}", data=data, headers=headers
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.load(response)

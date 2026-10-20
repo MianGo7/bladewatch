@@ -1,5 +1,8 @@
+from collections.abc import Iterator
+
 import pytest
 
+from .pipeline import Environment, isolated_environment
 from .stack import SERVICE_PORTS, port_is_open
 
 
@@ -11,3 +14,9 @@ def stack_is_running() -> None:
             f"The stack is not running ({', '.join(closed)} unreachable). "
             "Start it with `docker compose up -d --wait`."
         )
+
+
+@pytest.fixture
+def environment() -> Iterator[Environment]:
+    with isolated_environment() as environment:
+        yield environment
