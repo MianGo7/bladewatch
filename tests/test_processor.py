@@ -23,6 +23,7 @@ from bladewatch.processor import (
 from bladewatch.storage import (
     AlertRow,
     BatchResult,
+    MachineRow,
     OpenAlertRow,
     ReadingRow,
     StorageError,
@@ -140,6 +141,7 @@ class FakeStorage:
         self.readings: list[ReadingRow] = []
         self.alerts: list[AlertRow] = []
         self.history_requests: list[tuple[str, float]] = []
+        self.registered: list[MachineRow] = []
 
     def store_batch(
         self, readings: Sequence[ReadingRow], alerts: Sequence[AlertRow]
@@ -150,6 +152,10 @@ class FakeStorage:
         self.readings.extend(readings)
         self.alerts.extend(alerts)
         return BatchResult(len(readings), 0, len(alerts), 0)
+
+    def register_machines(self, machines: Sequence[MachineRow]) -> None:
+        self._journal.calls.append("register")
+        self.registered.extend(machines)
 
     def recent_readings(
         self, machine_id: str, span_s: float
@@ -405,3 +411,19 @@ def test_the_consumer_group_follows_the_settings() -> None:
     )
 
     assert consumer_config(plant)["group.id"] == "g"
+
+
+def test_start_registers_the_machines_with_their_thresholds() -> None:
+    rig = build()
+
+    rig.processor.restore()
+
+    assert rig.storage.registered == [MachineRow("mould-01", "mould", 70.0, 80.0, 95.0)]
+
+
+def test_the_machines_are_registered_before_the_rules_are_restored() -> None:
+    rig = build()
+
+    rig.processor.restore()
+
+    assert rig.journal.calls[0] == "register"

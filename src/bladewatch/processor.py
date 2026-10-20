@@ -28,6 +28,7 @@ from bladewatch.rules import (
 from bladewatch.storage import (
     AlertRow,
     BatchResult,
+    MachineRow,
     OpenAlertRow,
     ReadingRow,
 )
@@ -102,6 +103,9 @@ class StorageClient(Protocol):
         self, readings: Sequence[ReadingRow], alerts: Sequence[AlertRow]
     ) -> BatchResult:
         """Stores readings and alert events in one transaction."""
+
+    def register_machines(self, machines: Sequence[MachineRow]) -> None:
+        """Writes the machines and their thresholds."""
 
     def recent_readings(
         self, machine_id: str, span_s: float
@@ -187,11 +191,25 @@ class StreamProcessor:
         self._alert_failures = 0
 
     def restore(self) -> None:
-        """Rebuilds the state of the rules from the database (ADR-0020).
+        """Registers the machines and rebuilds the rules from the database.
 
-        For each machine the stored readings of two window lengths and one
-        interval fill the rate window, and the open alert, if any, is taken over.
+        The machines and their thresholds are written first, so that the
+        dashboard shows them (ADR-0021). Then, for each machine, the stored
+        readings of two window lengths and one interval fill the rate window, and
+        the open alert, if any, is taken over.
         """
+        self._storage.register_machines(
+            [
+                MachineRow(
+                    machine.machine_id,
+                    machine.machine_type.name,
+                    machine.machine_type.normal_c,
+                    machine.machine_type.warning_c,
+                    machine.machine_type.critical_c,
+                )
+                for machine in self._plant.machines
+            ]
+        )
         window_s = self._plant.rules.rate_window_s
         span_s = 2.0 * window_s + self._plant.sensor.interval_s
         open_alerts = self._storage.open_alerts()

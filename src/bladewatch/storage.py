@@ -67,6 +67,17 @@ ORDER BY a.alert_id, a.measured_at DESC
 """
 
 
+_UPSERT_MACHINE = """
+INSERT INTO machines (machine_id, machine_type, normal_c, warning_c, critical_c)
+VALUES (%s, %s, %s, %s, %s)
+ON CONFLICT (machine_id) DO UPDATE SET
+    machine_type = EXCLUDED.machine_type,
+    normal_c = EXCLUDED.normal_c,
+    warning_c = EXCLUDED.warning_c,
+    critical_c = EXCLUDED.critical_c
+"""
+
+
 class StorageError(RuntimeError):
     """The database did not accept a batch or a query."""
 
@@ -135,6 +146,25 @@ class OpenAlertRow:
     machine_id: str
     kind: str
     severity: str
+
+
+@dataclass(frozen=True, slots=True)
+class MachineRow:
+    """A machine with its thresholds, as the dashboard shows it.
+
+    Attributes:
+        machine_id: Identifier of the machine.
+        machine_type: Name of the machine type.
+        normal_c: Normal operating temperature in degrees Celsius.
+        warning_c: Warning threshold in degrees Celsius.
+        critical_c: Critical threshold in degrees Celsius.
+    """
+
+    machine_id: str
+    machine_type: str
+    normal_c: float
+    warning_c: float
+    critical_c: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +291,35 @@ class Storage:
             alerts_inserted=alerts_inserted,
             alerts_ignored=len(alerts) - alerts_inserted,
         )
+
+    def register_machines(self, machines: Sequence[MachineRow]) -> None:
+        """Writes the machines and their thresholds, replacing earlier values.
+
+        The configuration is the source of the thresholds, so a change there
+        reaches the dashboard at the next start of the processor (ADR-0021).
+
+        Args:
+            machines: The monitored machines.
+
+        Raises:
+            StorageError: If the table could not be written.
+        """
+        connection = self._require_connection()
+        try:
+            with connection.transaction(), connection.cursor() as cursor:
+                for machine in machines:
+                    cursor.execute(
+                        _UPSERT_MACHINE,
+                        (
+                            machine.machine_id,
+                            machine.machine_type,
+                            machine.normal_c,
+                            machine.warning_c,
+                            machine.critical_c,
+                        ),
+                    )
+        except psycopg.Error as error:
+            raise StorageError(f"machines could not be written: {error}") from error
 
     def recent_readings(
         self, machine_id: str, span_s: float
