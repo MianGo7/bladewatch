@@ -64,6 +64,36 @@ last 9 minutes.
 | `scenario-notification-output.txt` | The terminal output of the scenario with the notification of the contact point as the receiver logged it, cut to the lines of the start, the notification, and the end of the production | not a screenshot | text |
 | `m4-demonstration-scenario.md` | The results of the measurement M4 over three undisturbed runs, with the commit, the date, and the scenario | not a screenshot | table |
 
-The hourly history of a machine for the scenario is not part of this set. It is retaken
-after the runs of B8, when the database holds hours of data, and before the next
-`scenario --reset`, which deletes the data of the scenario machines.
+The hourly history of a machine for the scenario is not part of this set. The existing
+picture `dashboard-hourly-history-mould-01-normal-operation.png` documents the panel only and
+is not a result figure. The hourly aggregate that it reads is verified by the integration tests
+of FR8 and FR10.
+
+## Measurements M1 to M3
+
+The tables and figures are rendered from the raw results of the runs of 2026-10-20 with
+`uv run python -m bladewatch measure figures <file>`, and each table names the commit, the
+date, the hardware, and the Docker limits of its run.
+
+| File | What it shows |
+| --- | --- |
+| `m1-latency.md`, `m1-latency.pdf`, `m1-latency.png` | M1: the median, 95th percentile, 99th percentile, and maximum of every stage over 21,600 readings, the time to the stored alert event, and the cumulative distribution of the time from measurement to storage in each run |
+| `m2-throughput.md`, `m2-throughput.pdf`, `m2-throughput.png` | M2: stored against offered readings per second, the 95th percentile of the time to storage, the largest lag, and the course of the lag in the last step, over three runs of the ramp |
+| `m3-faults.md`, `m3-faults.pdf`, `m3-faults.png` | M3: the readings sent, stored, missing, and stored twice for three runs of each way of stopping the processor, and the course of the lag |
+
+## Notes on the figures of M2
+
+The lag in the last panel of `m2-throughput.png` is drawn to the end of the load. After the
+load no message arrives, and the backlog is processed within the seconds to drain of the table,
+so that the fall of the lag to zero at the end of the step belongs to the end of the load and not
+to the processor. In the run of the step of 25,000 readings per second that reached it first, the
+backlog of 79,500 messages at the end of the load was processed in 3.5 seconds.
+
+The lag of the steps of 25,000 readings per second stays at zero for the first 60 seconds and then
+grows. The time from broker to processor and the time from processor to storage both step up at
+the 60th second of the step, and the processor costs about 10 microseconds per reading instead of
+about 1 once the rate window of 60 seconds of a stream is full (A15). The stage times by stretch of
+ten seconds are the table and the figure `m2-step-profile` for the failing step with the largest
+load. The step was run again alone to take the profile, with a stored rate of 24,913 readings per
+second, a 95th percentile of 0.915 seconds, and a largest lag of 27,500 messages.
+
