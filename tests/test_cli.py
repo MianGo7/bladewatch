@@ -53,3 +53,23 @@ def test_the_notify_command_listens_on_loopback_at_the_port_of_the_contact_point
     arguments = build_parser().parse_args(["notify"])
 
     assert (arguments.host, arguments.port) == ("127.0.0.1", 8089)
+
+
+def test_the_scenario_command_does_not_reset_unless_it_is_asked_to() -> None:
+    arguments = build_parser().parse_args(["scenario"])
+
+    assert arguments.reset is False
+    assert (arguments.repetitions, arguments.seed, arguments.fast) == (3, 1, False)
+
+
+def test_the_scenario_command_takes_the_reset_flag_and_its_options() -> None:
+    arguments = build_parser().parse_args(
+        ["scenario", "--reset", "--repetitions", "1", "--seed", "9", "--fast"]
+    )
+
+    assert (arguments.reset, arguments.repetitions, arguments.seed, arguments.fast) == (
+        True,
+        1,
+        9,
+        True,
+    )

@@ -8,12 +8,14 @@ import sys
 import threading
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from types import FrameType
 
 from bladewatch.config import (
     DatabaseSettings,
     KafkaSettings,
     NotifierSettings,
+    ScenarioSettings,
     default_plant,
 )
 from bladewatch.notifier import NotificationServer
@@ -28,6 +30,7 @@ from bladewatch.producer import (
     create_kafka_producer,
     run,
 )
+from bladewatch.scenario import Options, ScenarioError, run_scenario
 from bladewatch.storage import Storage, StorageError
 
 logger = logging.getLogger(__name__)
@@ -106,6 +109,41 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=NotifierSettings().port,
         help="port to listen on; it has to match the contact point in infra/grafana",
+    )
+
+    scenario = commands.add_parser(
+        "scenario",
+        help="run the demonstration scenario for the steering committee",
+    )
+    scenario.add_argument(
+        "--reset",
+        action="store_true",
+        help="delete the data of earlier runs from the topics and the tables "
+        "first; without it the scenario refuses to start on a stack that holds data",
+    )
+    scenario.add_argument(
+        "--repetitions",
+        type=int,
+        default=ScenarioSettings().repetitions,
+        help="number of runs; more than one needs --reset",
+    )
+    scenario.add_argument(
+        "--seed",
+        type=int,
+        default=ScenarioSettings().seed,
+        help="seed of the simulation; equal seeds give equal readings",
+    )
+    scenario.add_argument(
+        "--fast",
+        action="store_true",
+        help="publish without waiting; the alerts are the same but no latency "
+        "is meaningful, and nothing is written to the output directory",
+    )
+    scenario.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("results"),
+        help="directory for the results of the measurement M4",
     )
     return parser
 
@@ -188,6 +226,23 @@ def _notify(host: str, port: int) -> int:
     return 0
 
 
+def _scenario(
+    reset: bool, repetitions: int, seed: int, fast: bool, output_dir: Path
+) -> int:
+    scenario = ScenarioSettings(seed=seed, repetitions=repetitions)
+    options = Options(
+        pace=not fast, watch_dashboard=not fast, show_notifications=not fast
+    )
+    if fast:
+        logger.warning("fast mode: the latencies of this run mean nothing")
+    try:
+        run_scenario(default_plant(), scenario, reset, options, output_dir)
+    except (ScenarioError, StorageError, ProcessorError) as error:
+        logger.error("%s", error)
+        return 2
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Runs the command line and returns the exit status.
 
@@ -210,4 +265,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if arguments.command == "notify":
         return _notify(arguments.host, arguments.port)
+    if arguments.command == "scenario":
+        return _scenario(
+            arguments.reset,
+            arguments.repetitions,
+            arguments.seed,
+            arguments.fast,
+            arguments.output_dir,
+        )
     raise AssertionError(f"unhandled command {arguments.command}")
