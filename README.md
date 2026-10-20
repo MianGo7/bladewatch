@@ -62,6 +62,20 @@ of the measurement M4 to `results/`. Without `--reset` the command refuses to st
 the topics or the tables already hold data of the scenario, and names what `--reset`
 would delete.
 
+## Measurements
+
+The latency, throughput, and fault tolerance measurements run against the started stack
+and write a raw result to `results/`:
+
+    uv run python -m bladewatch measure latency --reset      # M1, three runs of 10 minutes
+    uv run python -m bladewatch measure throughput --reset   # M2, the ramp of load steps
+    uv run python -m bladewatch measure faults --reset       # M3, the processor is stopped
+    uv run python -m bladewatch measure figures results/m2-<stamp>.json
+
+Without `--reset` a measurement refuses to start when the topics or the load streams
+hold data. The ramp takes about 20 minutes per run and all three measurements about two
+hours, during which the machine should not be used for other work.
+
 ## Tools and licences
 
 | Tool | Version | Licence |

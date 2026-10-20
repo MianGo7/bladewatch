@@ -1010,3 +1010,186 @@ keeps the machine awake. The reset is scoped to the machines of the
 scenario, so that it does not touch other rows, but it does delete the messages of the
 whole topics, which are shared with any other producer. The results of the measurement go
 to `results/`, which is not versioned, and a summary table is kept in `docs/figures/`.
+
+
+## ADR-0024: The packages `measure` and `bench`, separate processes, and raw results
+
+Date: 2026-10-20. Status: accepted. Extends ADR-0023 for the measurements M1 to M3.
+
+**Context.** The throughput measurement M2 and the fault tolerance measurement M3 have to
+run a producer and a processor at loads far above the 12 readings per second of the
+case, and M3 has to stop and start the processor. ADR-0023 put the orchestration of the
+scenario in a module of its own, because the architecture lets `measure` import only
+`messages` and `config`. The results have to name the commit, the date, the hardware,
+and the Docker limits, and a table of the case study has to be rebuilt from the raw
+output without a new run.
+
+**Decision.** Two packages. `measure` holds what is computed from a raw result: the
+distributions and the criteria of a load step, the Markdown tables, the figures, and
+the rendering of a result file. It imports only `config` and the numerical libraries.
+`bench` holds what runs against the stack: the access to the broker, the record of the
+environment, and the three measurements. It imports `config`, `storage`, `scenario`, and
+the statistics of `measure`, and `cli` is the only module that uses the two packages.
+The command is `python -m bladewatch measure`, with the kinds `latency`, `throughput`,
+`faults`, and `figures`. M1 reuses the run of the scenario, in which the processor is a
+thread, because at 12 readings per second the competition for the interpreter is
+negligible and the path is that of M4. M2 and M3 start the producer and the processor as
+processes of their own, through the entry points `produce` and `process`, which got the
+options `--machines` for the number of streams and `--group` for the consumer group, and
+they stop the processor with SIGTERM or SIGKILL. The consumer lag is read from the broker
+once per second with the administration interface, as the difference of the end offsets
+of the topic and the committed offsets of the group; because the processor commits after
+the database transaction (ADR-0020), the committed offset counts the readings that are
+stored, so that the achieved rate does not need a count of rows. A run empties both topics
+and deletes the rows of the streams, whose identifiers start with `load-`, and the
+command refuses to start on a stack that holds such data unless `--reset` is given, as
+the scenario does. Every measurement writes one JSON file to `results/`, which holds the
+environment, the settings, and the numbers, and `measure figures` renders the table and
+the figure of the case study into `docs/figures/` from that file.
+
+**Alternatives.** Producer and processor as threads of one process were rejected for M2,
+because the two would compete for the interpreter lock and the achieved rate would then
+measure the interpreter and not the processor. The `multiprocessing` module was rejected
+because the command line entry points are the ones that a deployment uses, and every
+process keeps a log of its own. A count of the rows once per second for the achieved rate
+was rejected, because the count over millions of rows would load the database that is
+being measured. Keeping the three measurements in `measure` was rejected for the reason of
+ADR-0023, and a separate package for the runs was chosen.
+
+**Consequences.** The statistics, the tables, and the figures are tested without the
+stack, and the runs have integration tests that use the topics of the stack and empty them.
+The processor registers the load streams in the table `machines` (ADR-0021), so that they
+appear on the dashboard while a step runs, and they are deleted at the end of the step. The
+producer publishes the readings of one tick in a burst, and all of them carry the time of
+the start of the tick, so that the stage from measurement to broker contains the time that
+the producer needs for the tick, which grows with the number of streams.
+
+
+## ADR-0025: Matplotlib for the figures
+
+Date: 2026-10-20. Status: accepted.
+
+**Context.** The measurements produce figures for the case study. They have to be black on
+white, labelled in English with units on every axis, set in Arial where it is installed,
+saved as a vector file and as a PNG at 300 dots per inch, and rebuilt from the raw
+results. A new dependency needs a record, and it has to be pinned to an exact version.
+
+**Decision.** Matplotlib 3.11.2 is added with its dependencies, which `uv` resolves into the
+lock file. Only `bladewatch.measure.figures` imports it, which a test checks, and it uses
+the object oriented interface without the state machine of `pyplot`, so that no backend or
+global figure is involved. The series are told apart by marker and line style and not by
+colour. The figures are saved as PDF and as PNG.
+
+**Alternatives.** pandas, which the backlog names for the case that the evaluation needs it,
+was not added, because the statistics are percentiles of lists and `numpy` does them. A
+plotting library for interactive pages was rejected because the figures are printed.
+Seaborn was rejected because it needs pandas. Screenshots of Grafana for the measurement
+figures were rejected because they cannot be rebuilt from the raw data and use colour.
+
+**Consequences.** Where Arial is missing, the figures fall back to DejaVu Sans, which
+changes their look and not their content. The package adds Pillow, FontTools, and four
+small libraries to the environment.
+
+
+## ADR-0026: The definitions of M1 and M2
+
+Date: 2026-10-20. Status: accepted.
+
+**Context.** The measurement plan names M1 and M2 and their indicators, but not their
+profiles, their duration, or the rule by which a load step fails. These values decide
+what the numbers mean and cannot be chosen after they are seen.
+
+**Decision.** M1 runs the incident of the demonstration scenario for 600 seconds three
+times without the observers of M4 (A24) and reports the four statistics of every stage over
+all readings and the time to the stored alert event over the raised events. A run during
+which the machine sleeps is discarded and repeated, by the rule of ADR-0023. M2 offers each
+step of A9 for 120 seconds to one processor with a consumer group of its own, started for
+the step after the topics and the load streams were emptied, and repeats the whole ramp
+three times (A21, A22). The producer and the processor are processes of their own
+(ADR-0024). A step fails when the producer delivers less than 95 percent of the offered
+load, when the 95th percentile of the time from measurement to storage exceeds 5 seconds,
+or when the floor of the lag gains more than 1 percent of the offered rate per second over
+the second half of the step, and a ramp stops at its first failing step. The lag is the end offset of
+the topic minus the committed offset of the group, summed over the partitions and sampled
+once per second. Whether it grows is decided by its floor, the smallest lag in each stretch
+of 5 seconds, and the slope of that floor is the least squares line through the floors of the
+second half. The achieved rate is the slope of
+the committed offset over the same half. After the load the run waits until the lag is zero,
+for at most 300 seconds, and reports that time. The messages of every partition are
+recorded, so that the spread of A10 is shown. The statistics of a step come from the
+database over all readings of the step.
+
+**Revision after the first run.** The first complete run of the ramp took the slope of a line
+through the samples of the lag. The producer publishes the readings of a tick in a burst
+(ADR-0024), so that the lag of a processor that keeps up is a sawtooth of the height of one
+second of load, which is sampled once per second at a phase that drifts. The line then had a
+slope above 1 percent of the offered rate in three steps although the achieved rate equalled
+the offered rate, the largest lag was one tick, and the 95th percentile of the time to
+storage was 0.21 to 0.23 seconds: 12 readings per second in the first run of the ramp, 100 in
+the second, and 5,000 in the third, with slopes of 0.21, 1.44, and 57.7 messages per second
+against limits of 0.12, 1, and 50. The ramps of the first and second run stopped at these
+steps and did not show a limit. The estimator was replaced by the floor of the lag over
+stretches of 5 seconds, the threshold of 1 percent was kept, and the whole ramp was run
+again. The raw file of the first run, `results/m2-20261020T152255Z.json`, is kept in the local
+results and is described in the journal.
+
+**Alternatives.** The maximum instead of the 95th percentile was rejected as the criterion,
+because one reading that waits for a rebalance would end a ramp, and the mean was rejected
+because it hides the tail that the target is about. An absolute limit of the lag was
+rejected because the lag of a stable processor depends on the batch size and on the rate.
+A search by halving between two steps was rejected because A9 fixes the steps. A longer
+step gives smoother slopes and takes hours for the three runs of a ramp. The step of a
+ramp that fails because the generator delivers too little is reported as such and is not
+counted as a limit of the processor.
+
+**Consequences.** The limit that M2 finds is that of one processor, one broker, and one
+database under the Docker limits of the run, and it is not extrapolated (A9). The ramp
+stops at the first failing step, so that the higher steps are not measured, and the result
+says that the limit lies between the last passed and the first failed step. Because each
+step starts a new processor, the startup time of the processor, which grows with the number
+of streams, is recorded for every step and is not part of the latency. The stage times are also
+recorded by stretch of ten seconds of every step, which showed for the step of 25,000 readings
+per second that the processor slows down at the 60th second, when the rate window of A15 is
+full and the rule costs about ten times as much per reading. The limit that M2 finds is
+therefore partly the cost of that rule, which grows with the length of the window.
+
+
+## ADR-0027: The definition of M3, and the client defaults of the group
+
+Date: 2026-10-20. Status: accepted.
+
+**Context.** NFR2 states that no reading is lost and none stored twice when the processor
+is stopped and started again under load. ADR-0020 gives the order in which a batch is
+processed and committed, and the measurement has to show that the order holds under load
+and what a restart costs.
+
+**Decision.** A producer offers the load of A23 for 120 seconds. After 30 seconds the
+processor is stopped, after a further 30 seconds a new processor of the same group is
+started, and the load ends after 60 more seconds. The stop is a kill at once in one kind of
+run and a request to finish the batch in the other, three runs of each. The measurement
+counts the readings that the broker received, the distinct readings and the rows in the
+database, from which it reports the readings that are missing and the rows beyond the
+distinct readings. It counts the readings that the restarted processor received again by the
+lines of its log that name a batch with readings that were already stored, which the
+processor writes since B8. It reports the lag at the restart, the time from the start of the
+new processor to its first commit, to a lag of at most one second of the load, and to a lag
+of zero. The session timeout of a group member is set in the configuration of the processor to the
+default of the client, 45,000 milliseconds (A25), and is not changed; the heartbeat interval
+stays at the default of the client. The default was checked by
+killing a consumer with default settings, which the broker removed from its group after 45.0
+seconds.
+
+**Alternatives.** A stop by an exception inside the processor was rejected because it tests
+the handler and not the loss of the process. Counting the received again readings from the
+database was rejected because the insert ignores them without a trace. A shorter session
+timeout would shorten the recovery after a kill and would be tuning for the measurement. A
+measurement with several consumers was left out because ADR-0020 excludes them for the
+prototype, so that scale-out is argued and not measured.
+
+**Consequences.** After a kill the group has to notice that the member is gone before the
+new member receives the partitions, which takes the session timeout of A25, and that time
+belongs to the recovery that M3 reports. The first commit of the new processor followed a kill
+after 15.0 to 15.8 seconds, which is 45.0 to 45.8 seconds after the kill and equals the stated
+setting. A stop in the middle of a batch is a matter of
+chance at a given load, so that the number of the readings that are received again varies
+between runs and can be zero.

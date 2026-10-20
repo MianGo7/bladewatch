@@ -171,7 +171,7 @@ Documents to update: `concept.md`, `requirements.md`, `dev-journal.md`.
 
 ## B8: Measurements
 
-Status: open.
+Status: done.
 
 Scope: the measurements M1 to M3 as code with their load profiles, the
 recording of the hardware and the Docker resource limits, and the figures and

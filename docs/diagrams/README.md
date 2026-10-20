@@ -36,5 +36,11 @@ from `compose.yaml`.
   `processor`, `storage`, `notifier`, `sensor`, and `config`, and `cli` is the only
   module that uses it, so that it appears in the component diagram of B9 below `cli`
   and above these modules.
+- The package `bench` sits next to `scenario`. It imports `config`, `storage`,
+  `scenario`, and `measure`, and starts the producer and the processor as processes
+  through the command line, so that it does not import them. The package `measure`
+  imports only `config`, and `cli` is the only module that uses the two, so that they
+  appear in the component diagram of B9 below `cli`, with `bench` above `scenario`,
+  `storage`, and `measure`.
 - The state diagram of the alert is checked by a test: its arrows have to equal
   the allowed transitions in `src/bladewatch/rules.py`.

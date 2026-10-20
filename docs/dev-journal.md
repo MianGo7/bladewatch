@@ -512,7 +512,125 @@ first overview picture of the first repeat had the pointer of the browser in it,
 were taken at the width that the window allowed, 1100 pixels for the moulds, which gives a chart
 with more axis labels than before, and 900 pixels for the events.
 
-**Next.** B8, the measurements M1 to M3, with the recording of the hardware that was done here.
-The hourly history screenshot is retaken after the runs of B8 and before the next
-`scenario --reset`. The continuous integration run on GitHub has succeeded for the earlier
-pushes and is not part of this item.
+B8, the measurements M1 to M3. Two packages were added, `measure` for what is computed from a
+raw result and `bench` for the runs against the stack, with the command
+`python -m bladewatch measure`. The producer and the processor got the options `--machines` and
+`--group`, the processor logs a batch whose readings were already stored, and `storage` got the
+counts, the deletion, and the latency summary for a family of machines. Matplotlib 3.11.2 was
+added for the figures. The unit tests cover the statistics, the criteria of a load step, the
+tables, the figures, the settings, and the boundaries of the packages, and five integration tests
+run a short step and a short stop and start of the processor against the stack. The decisions are
+ADR-0024 to ADR-0027 and the assumptions A21 to A24, and A10 was corrected: six partitions allow
+up to six consumers in a later scale-out, which ADR-0020 excludes for the prototype, so that M2
+measures one processor and the scale-out is argued and not measured.
+
+**Problems (B8).** The first complete run of the ramp of M2 was not usable as it stood. The
+criterion for a lag that grows was the slope of a line through the lag samples, and the producer
+publishes the readings of a tick in a burst, so that the lag of a processor that keeps up is a
+sawtooth of the height of one second of load. The slope exceeded 1 percent of the offered rate at
+12, 100, and 5,000 readings per second in the three runs, although the stored rate equalled the
+offered rate and the 95th percentile of the time to storage was 0.21 to 0.23 seconds, so that two
+ramps stopped at steps that the processor handles easily. The cause was the estimator and not the
+processor. It was replaced by the floor of the lag over stretches of 5 seconds, the threshold of
+1 percent was kept, and the ramp was run again. The raw file of the first run, which is
+`results/m2-20261020T152255Z.json`, is kept and named in ADR-0026. The first estimator was written
+before any run and failed on the first data, which is a limit of designing a criterion without a
+trial. Furthermore, the figure of the throughput first had unreadable ticks on the logarithmic
+axes and a clipped label, and the first figure of M1 had a legend over a marker; both were
+corrected in the drawing code and not in the data.
+
+**Observation (B8, measurements M1 to M3).** Date 2026-10-20, working tree on top of the commit
+0ee4c8b, which the raw files name as the commit with uncommitted changes. Hardware: Mac17,8 with an
+Apple M5 Pro, 48 GiB of memory, macOS 27.0.1. Docker Engine 29.8.2 with the limits of 18 CPUs and
+7.746 GiB of memory, which have not been fixed by hand. Images as for M4. All runs under
+`caffeinate`, between 17:06 and 18:48, with no other measurement or test running. No query of Grafana was
+seen in the database before the runs.
+
+M1, three runs of 600 seconds at 12 readings per second, none disturbed: over 21,600 readings the
+time from measurement to storage had a median of 0.123, a 95th percentile of 0.215, a 99th
+percentile of 0.227, and a maximum of 0.555 seconds. By stage, measurement to broker had a median
+of 0.013 and a maximum of 0.512, broker to processor a median of 0.105 and a maximum of 0.217, and
+processor to storage a median of 0.003 and a maximum of 0.034 seconds. The six raised alert events
+reached the database after 0.023 to 0.215 seconds, with a median of 0.108. The distribution agrees
+with that of M4 within about ten milliseconds, so that the poller of the dashboard and the receiver
+cost nothing that this measurement can resolve. The broker to processor stage is 85 percent of the
+median, and its maximum of 0.217 seconds is the wait of 0.2 seconds for a full batch of A17 plus
+the processing of the batch.
+
+M2, three runs of the ramp with 120 seconds per step, one producer process and one processor
+process. The steps of 12, 100, 500, 2,000, and 5,000 readings per second passed in all three runs
+with a stored rate of 99 to 102 percent of the offered rate. The 95th percentile of the time to storage
+was 0.22 seconds at 12 and 100, 0.05 at 500, 0.12 at 2,000, 0.23 at 5,000, and 0.41 at 10,000
+readings per second. The step of 10,000 failed the criterion for the lag in two runs, with floor
+growths of 126.5 and 102.5 messages per second against the limit of 100, and passed in the third
+with 78.0, while the stored rate was 10,021 to 10,031 per second, so that 10,000 is the edge of
+what one processor sustains. In the run that reached 25,000, the step failed clearly: the stored
+rate was 24,018 per second, the 95th percentile 2.567 seconds, and the lag reached 81,000
+messages after staying at zero for the first 60 seconds of the load. The cause of that delay of
+60 seconds is given in the following observation. The 95th percentile at 12 and 100
+readings per second is higher than at 500, which agrees with the wait of 0.2 seconds of A17 for a
+batch that does not fill, and this reading was not checked separately. The time that the processor
+needs to start grows with the number of streams, from 0.5 seconds at 12 to 8.8 seconds at 10,000
+and 21.5 seconds at 25,000. The share of the largest partition falls from 33.3 percent at 12 streams
+to 17.0 percent at 25,000, which approaches the even share of 16.7 percent that A10 expected. Every
+reading that was delivered was stored in all 19 steps.
+
+M3, six runs at 2,000 readings per second, three with the processor killed and three stopped after
+its batch: of 240,000 readings sent in every run, 240,000 distinct readings were stored, none was
+missing, and no row was stored twice. The restarted processor received no reading again in any run,
+so that the window between the database commit and the offset commit was not hit, and that path is
+covered by the integration test of B5 and not by this measurement. The backlog at the restart was
+58,000 to 60,000 messages. After a stop after the batch the first commit followed the start of the
+new processor after 2.55 to 2.56 seconds and the lag was at most one second of load after 3.6 to
+4.6 seconds. After a kill the first commit followed after 15.0 to 15.8 seconds, which is about 45 seconds after
+the kill, and the lag was at most one second of load after 17.8 to 19.1 seconds. The 45 seconds
+equal the session timeout of the group member, which the client sets to 45 seconds by default and
+which is now stated in the configuration (A25). The lag grew to 88,000 to 90,000 messages after a kill and to 62,000 after
+a stop after the batch.
+
+**Observation (B8, the step of 25,000 readings per second).** The rows of a step are deleted when the
+step ends, so that the stage timestamps of the run that reached 25,000 were no longer available.
+The step was therefore run again alone, with the same duration, seed, and criteria, after the
+profile of the stage times by stretch of ten seconds was added to the step, on the same working
+tree and hardware as above (raw file `results/m2-20261020T170927Z.json`). It failed the criterion
+for the lag as well, with a stored rate of 24,913 per second, a 95th percentile of the time to
+storage of 0.915 seconds, a largest lag of 27,500 messages, and a floor growth of 387 messages per
+second. The first run of the step had 24,018 per second, 2.567 seconds, and 81,000 messages, so
+that the severity of the failure differs between runs while the verdict does not.
+
+The profile shows when the time is lost. For the readings measured in the first 60 seconds, the
+median time from broker to processor was 0.237 to 0.250 seconds and the median time from processor
+to storage 6.4 to 6.7 milliseconds. For the readings measured from the 60th second on, the two
+medians were 0.441 to 0.462 seconds and 10.4 to 10.9 milliseconds, with a further rise of the
+first to 0.597 in the last stretch. Both stages therefore step up in the same stretch, and the
+stage from broker to processor carries 35 to 55 times more time than the stage from processor to
+storage in every stretch. The lag was zero until the 60th second, reached 500 messages in the
+stretch of the 60th second, and grew from the 80th second on, while the stored rate stayed at 24,400
+to 25,000 per second, so that the processor kept up with the offered rate until the step and fell
+behind after it.
+
+The step coincides with the moment at which the rate window of each stream is full. The window is
+60 seconds long (A15), the rate check is silent until it is full, and from then on every reading
+costs a least squares fit over the 60 readings of the window (ADR-0018). A measurement of the
+rules alone, in one process on this machine, gave 1.4 and 0.9 microseconds per reading while the
+window was filling and 10.2 microseconds per reading once it was full. At 25,000 readings per
+second the difference is 0.23 seconds of processing per second. The evaluation of the readings of a
+batch precedes the write of the batch and assigns the time `processed_at` to each reading, so that
+a slower evaluation lengthens both stages, as the profile shows. The cause of the delay is
+therefore the cost of the rule, which is a limit of the single processor and not of Kafka or of the
+database. It is not changed in this item, because the measurement describes the processor as it is,
+and a running sum for the least squares fit, which would remove the dependence on the length of the
+window, is named as a possible improvement in the reflection. The measurement of the rules was a
+single run, and its share of the delay is an estimate and not a measured decomposition of the
+step.
+
+The sudden drop of the lag from about 80,000 messages to zero at about 120 seconds in the figure of
+the first run is the end of the load. The producer stopped at 118.4 seconds, no message arrived
+after that, and the backlog was processed within the 3.5 seconds that the table gives as seconds to
+drain, at about 23,000 messages per second, which is about the speed of the processor during the load. It
+is neither an error of the sampling nor a recovery of the processor. The figure is therefore drawn
+to the end of the load, and the drain is reported in the table.
+
+**Next.** B9, the structure and deployment diagrams, the limits, and the finish, which also derives
+the component diagram with the packages `measure` and `bench`. The measurements are repeated on the commit
+of B8 once it exists, so that the raw files name a clean working tree.
