@@ -323,3 +323,104 @@ def test_the_latency_summary_of_machines_without_readings_is_empty(
 
     assert summary.readings == 0
     assert summary.stages == {}
+
+
+def test_counting_by_prefix_covers_the_machines_that_start_with_it(
+    prefix: str, storage: Storage
+) -> None:
+    storage.register_machines(
+        [_machine_row(f"{prefix}-a"), _machine_row(f"{prefix}-b"), _machine_row("x")]
+    )
+    storage.store_batch(
+        [_reading(f"{prefix}-a", n) for n in range(3)] + [_reading(f"{prefix}-b", 0)],
+        [],
+    )
+
+    counts = storage.count_by_prefix(prefix)
+
+    assert counts == {"readings": 4, "distinct_readings": 4, "machines": 2}
+    storage.clear_machines(["x"])
+
+
+def test_a_prefix_is_not_a_pattern(prefix: str, storage: Storage) -> None:
+    storage.store_batch(
+        [_reading(f"{prefix}-a_b", 0), _reading(f"{prefix}-axb", 0)], []
+    )
+
+    counts = storage.count_by_prefix(f"{prefix}-a_b")
+
+    assert counts["readings"] == 1
+
+
+def test_clearing_by_prefix_leaves_other_machines_alone(
+    prefix: str, storage: Storage
+) -> None:
+    other = f"{prefix.replace('it-', 'ot-')}-oven"
+    ours = f"{prefix}-mould"
+    storage.register_machines([_machine_row(ours), _machine_row(other)])
+    storage.store_batch(
+        [_reading(ours, 0), _reading(other, 0)],
+        [_alert(ours, f"{ours}:threshold:a")],
+    )
+
+    storage.clear_by_prefix(prefix)
+
+    assert storage.count_rows([ours]) == {"readings": 0, "alerts": 0, "machines": 0}
+    assert storage.count_rows([other]) == {"readings": 1, "alerts": 0, "machines": 1}
+    storage.clear_machines([other])
+
+
+def test_the_latency_by_prefix_equals_the_latency_by_machines(
+    prefix: str, storage: Storage
+) -> None:
+    machine = f"{prefix}-mould"
+    storage.store_batch([_reading(machine, n) for n in range(20)], [])
+
+    by_prefix = storage.stage_latencies_by_prefix(prefix)
+
+    assert by_prefix.readings == 20
+    assert by_prefix.stages["broker to processor"].median_s == pytest.approx(
+        0.015, abs=1e-6
+    )
+
+
+def test_the_samples_hold_one_value_per_reading_and_stage(
+    prefix: str, storage: Storage
+) -> None:
+    machine = f"{prefix}-mould"
+    storage.store_batch([_reading(machine, n) for n in range(7)], [])
+
+    samples = storage.stage_samples([machine])
+
+    assert set(samples) == {
+        "measured to broker",
+        "broker to processor",
+        "processor to stored",
+        "measured to stored",
+    }
+    assert all(len(values) == 7 for values in samples.values())
+    assert samples["measured to broker"][0] == pytest.approx(0.005, abs=1e-6)
+
+
+def test_the_profile_groups_the_readings_by_the_time_of_their_measurement(
+    prefix: str, storage: Storage
+) -> None:
+    machine = f"{prefix}-mould"
+    storage.store_batch([_reading(machine, n) for n in range(25)], [])
+
+    profile = storage.stage_profile_by_prefix(prefix, 10.0)
+
+    assert [(b.start_s, b.readings) for b in profile] == [
+        (0.0, 10),
+        (10.0, 10),
+        (20.0, 5),
+    ]
+    assert profile[0].stages["broker to processor"].median_s == pytest.approx(
+        0.015, abs=1e-6
+    )
+
+
+def test_the_profile_of_a_family_without_readings_is_empty(
+    prefix: str, storage: Storage
+) -> None:
+    assert storage.stage_profile_by_prefix(f"{prefix}-none", 10.0) == []

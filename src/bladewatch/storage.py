@@ -104,7 +104,10 @@ _STAGES = {
 }
 
 
-def _stage_query() -> str:
+_PREFIX = "machine_id LIKE %(prefix)s"
+
+
+def _stage_columns() -> str:
     columns = []
     for expression in _STAGES.values():
         seconds = f"extract(epoch FROM {expression})"
@@ -113,11 +116,32 @@ def _stage_query() -> str:
             f"percentile_cont(0.95) WITHIN GROUP (ORDER BY {seconds}), "
             f"max({seconds})"
         )
-    return (
-        "SELECT count(*), "
-        + ", ".join(columns)
-        + " FROM readings WHERE machine_id = ANY(%(ids)s)"
-    )
+    return ", ".join(columns)
+
+
+def _stage_query(where: str = "machine_id = ANY(%(ids)s)") -> str:
+    return f"SELECT count(*), {_stage_columns()} FROM readings WHERE {where}"
+
+
+# The readings of a family are grouped by the time of their measurement, counted
+# from the first one, so that a stage that slows down at some moment of a run shows
+# at that moment (ADR-0026).
+_PROFILE_QUERY = f"""
+SELECT floor(extract(epoch FROM measured_at - f.first) / %(bucket_s)s) * %(bucket_s)s,
+       count(*), {_stage_columns()}
+FROM readings
+CROSS JOIN (
+    SELECT min(measured_at) AS first FROM readings WHERE {_PREFIX}
+) AS f
+WHERE {_PREFIX}
+GROUP BY 1
+ORDER BY 1
+"""
+
+
+def _like(prefix: str) -> str:
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return escaped + "%"
 
 
 class StorageError(RuntimeError):
@@ -263,6 +287,32 @@ class LatencySummary:
         stages: Statistics by the name of the stage, empty without readings.
     """
 
+    readings: int
+    stages: dict[str, StageStats]
+
+
+def _stage_summary(row: tuple[Any, ...]) -> LatencySummary:
+    readings = row[0]
+    if readings == 0:
+        return LatencySummary(0, {})
+    stages = {}
+    for index, name in enumerate(_STAGES):
+        median, p95, maximum = row[1 + 3 * index : 4 + 3 * index]
+        stages[name] = StageStats(float(median), float(p95), float(maximum))
+    return LatencySummary(readings, stages)
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileBucket:
+    """The stage times of the readings that were measured in one stretch of a run.
+
+    Attributes:
+        start_s: Seconds from the first measurement to the start of the stretch.
+        readings: Number of readings measured in the stretch.
+        stages: Statistics by the name of the stage.
+    """
+
+    start_s: float
     readings: int
     stages: dict[str, StageStats]
 
@@ -478,14 +528,108 @@ class Storage:
             machine_ids: The machines whose readings are summarised.
         """
         (row,) = self._fetch(_stage_query(), {"ids": list(machine_ids)})
-        readings = row[0]
-        if readings == 0:
-            return LatencySummary(0, {})
-        stages = {}
-        for index, name in enumerate(_STAGES):
-            median, p95, maximum = row[1 + 3 * index : 4 + 3 * index]
-            stages[name] = StageStats(float(median), float(p95), float(maximum))
-        return LatencySummary(readings, stages)
+        return _stage_summary(row)
+
+    def stage_latencies_by_prefix(self, prefix: str) -> LatencySummary:
+        """Summarises the time of every stage over a family of machines.
+
+        Args:
+            prefix: The start of the machine identifiers, which is not a pattern.
+        """
+        (row,) = self._fetch(_stage_query(_PREFIX), {"prefix": _like(prefix)})
+        return _stage_summary(row)
+
+    def stage_profile_by_prefix(
+        self, prefix: str, bucket_s: float
+    ) -> list[ProfileBucket]:
+        """Summarises the stage times of a family over stretches of its run.
+
+        Args:
+            prefix: The start of the machine identifiers, which is not a pattern.
+            bucket_s: Length of a stretch in seconds, counted from the first
+                measurement of the family.
+        """
+        rows = self._fetch(
+            _PROFILE_QUERY, {"prefix": _like(prefix), "bucket_s": bucket_s}
+        )
+        buckets = []
+        for row in rows:
+            summary = _stage_summary((row[1], *row[2:]))
+            buckets.append(ProfileBucket(float(row[0]), row[1], summary.stages))
+        return buckets
+
+    def stage_samples(self, machine_ids: Sequence[str]) -> dict[str, list[float]]:
+        """Returns the time of every stage for every stored reading, in seconds.
+
+        Args:
+            machine_ids: The machines whose readings are returned.
+        """
+        columns = ", ".join(
+            f"extract(epoch FROM {expression})" for expression in _STAGES.values()
+        )
+        rows = self._fetch(
+            f"SELECT {columns} FROM readings WHERE machine_id = ANY(%(ids)s)",
+            {"ids": list(machine_ids)},
+        )
+        return {
+            name: [float(row[index]) for row in rows]
+            for index, name in enumerate(_STAGES)
+        }
+
+    def count_by_prefix(self, prefix: str) -> dict[str, int]:
+        """Counts the readings, the distinct readings, and the machines of a family.
+
+        A distinct reading is a pair of machine and sequence number, so that the
+        difference to the count of rows shows a reading that is stored twice.
+
+        Args:
+            prefix: The start of the machine identifiers, which is not a pattern.
+        """
+        rows = self._fetch(
+            "SELECT count(*), count(DISTINCT (machine_id, sequence)) "
+            f"FROM readings WHERE {_PREFIX}",
+            {"prefix": _like(prefix)},
+        )
+        machines = self._fetch(
+            f"SELECT count(*) FROM machines WHERE {_PREFIX}",
+            {"prefix": _like(prefix)},
+        )
+        readings, distinct = rows[0]
+        return {
+            "readings": readings,
+            "distinct_readings": distinct,
+            "machines": machines[0][0],
+        }
+
+    def clear_by_prefix(self, prefix: str) -> None:
+        """Deletes the readings, alerts, and machine rows of a family of machines.
+
+        Only machines whose identifier starts with the prefix are touched. The
+        hourly aggregate is refreshed afterwards.
+
+        Args:
+            prefix: The start of the machine identifiers, which is not a pattern.
+
+        Raises:
+            StorageError: If a statement fails.
+        """
+        connection = self._require_connection()
+        try:
+            with connection.transaction(), connection.cursor() as cursor:
+                for table in ("readings", "alerts", "machines"):
+                    cursor.execute(
+                        f"DELETE FROM {table} WHERE {_PREFIX}",
+                        {"prefix": _like(prefix)},
+                    )
+            connection.autocommit = True
+            try:
+                connection.execute(
+                    "CALL refresh_continuous_aggregate('readings_hourly', NULL, NULL)"
+                )
+            finally:
+                connection.autocommit = False
+        except psycopg.Error as error:
+            raise StorageError(f"machines could not be cleared: {error}") from error
 
     def _fetch(self, statement: str, parameters: object) -> list[tuple[Any, ...]]:
         connection = self._require_connection()
