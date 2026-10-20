@@ -73,27 +73,40 @@ of FR8 and FR10.
 
 The tables and figures are rendered from the raw results of the runs of 2026-10-20 with
 `uv run python -m bladewatch measure figures <file>`, and each table names the commit, the
-date, the hardware, and the Docker limits of its run.
+date, the hardware, and the Docker limits of its run. The data were measured on the commit
+5a63d01 and rendered with the renderer of the commits 4770f60 and f34b8a4, which read the verdict
+of a step from its flags and draw the same step in the lag panel, the profile figure, and the table
+of the stage times.
 
 | File | What it shows |
 | --- | --- |
 | `m1-latency.md`, `m1-latency.pdf`, `m1-latency.png` | M1: the median, 95th percentile, 99th percentile, and maximum of every stage over 21,600 readings, the time to the stored alert event, and the cumulative distribution of the time from measurement to storage in each run |
 | `m2-throughput.md`, `m2-throughput.pdf`, `m2-throughput.png` | M2: stored against offered readings per second, the 95th percentile of the time to storage, the largest lag, and the course of the lag in the last step, over three runs of the ramp |
+| `m2-step-profile.pdf`, `m2-step-profile.png` | M2: the time from broker to processor and from processor to storage over the failing step with the largest load, by the time of the measurement of the readings |
 | `m3-faults.md`, `m3-faults.pdf`, `m3-faults.png` | M3: the readings sent, stored, missing, and stored twice for three runs of each way of stopping the processor, and the course of the lag |
 
 ## Notes on the figures of M2
 
-The lag in the last panel of `m2-throughput.png` is drawn to the end of the load. After the
-load no message arrives, and the backlog is processed within the seconds to drain of the table,
-so that the fall of the lag to zero at the end of the step belongs to the end of the load and not
-to the processor. In the run of the step of 25,000 readings per second that reached it first, the
-backlog of 79,500 messages at the end of the load was processed in 3.5 seconds.
+The lag in the last panel of `m2-throughput.png` is drawn to the end of the load, for the failing
+step with the largest load, or for the last step if none failed, which is here a step of 50,000
+readings per second. After the load no message arrives,
+and the backlog is processed within the seconds to drain of the table, so that the fall of the lag
+to zero at the end of a step belongs to the end of the load and not to the processor. In a run of the
+step of 25,000 readings per second in a first session, the backlog of 79,500 messages at the end of
+the load was processed in 3.5 seconds, at about the speed of the processor during the load.
 
-The lag of the steps of 25,000 readings per second stays at zero for the first 60 seconds and then
-grows. The time from broker to processor and the time from processor to storage both step up at
-the 60th second of the step, and the processor costs about 10 microseconds per reading instead of
-about 1 once the rate window of 60 seconds of a stream is full (A15). The stage times by stretch of
-ten seconds are the table and the figure `m2-step-profile` for the failing step with the largest
-load. The step was run again alone to take the profile, with a stored rate of 24,913 readings per
-second, a 95th percentile of 0.915 seconds, and a largest lag of 27,500 messages.
-
+In that first session the lag of the steps of 25,000 readings per second stayed at zero for the first
+60 seconds and then grew. The time from broker to processor and the time from processor to storage
+both stepped up at the 60th second, and the processor costs about 10 microseconds per reading instead
+of about 1 once the rate window of 60 seconds of a stream is full (A15). In the runs on the committed
+code the step of 25,000 passed, and the same step at the 60th second is visible in the profile of the
+step of 50,000 readings per second, which is `m2-step-profile`: the median time from processor to
+storage rises from 0.006 to 0.007 seconds to 0.011 to 0.012 seconds. The profile figure and its table
+are drawn for the failing step with the largest load, which is the third run of the step of 50,000
+readings per second, and the lag panel of `m2-throughput.png` shows the same run. The rise of the
+time from processor to storage at the 60th second does not come from a checkpoint of the database:
+checkpoints ran one after the other during the whole step and none started at about 60 seconds,
+which was read from the log of the container and is recorded in the journal. The single step of
+25,000 readings per second that was run again to take the profile had a stored rate of 24,913 readings per second, a 95th
+percentile of 0.915 seconds, and a largest lag of 27,500 messages, and failed the criterion for the
+lag.
