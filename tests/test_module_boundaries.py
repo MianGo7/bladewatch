@@ -1,4 +1,5 @@
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -47,3 +48,21 @@ def test_only_the_storage_module_imports_the_database_driver() -> None:
     }
 
     assert importers == {"storage"}
+
+
+def test_the_notifier_imports_only_the_standard_library_and_the_settings() -> None:
+    tree = ast.parse((PACKAGE / "notifier.py").read_text(encoding="utf-8"))
+    modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            modules.add(node.module)
+
+    foreign = {
+        module
+        for module in modules
+        if module.split(".")[0] not in sys.stdlib_module_names
+        and module != "bladewatch.config"
+    }
+    assert foreign == set()
