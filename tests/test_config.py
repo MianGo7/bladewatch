@@ -11,6 +11,7 @@ from bladewatch.config import (
     KafkaSettings,
     Machine,
     MachineType,
+    NotifierSettings,
     PlantSettings,
     ProcessorSettings,
     RuleSettings,
@@ -202,3 +203,20 @@ def test_processor_settings_require_a_positive_batch_size() -> None:
 def test_processor_settings_require_a_positive_poll_timeout(timeout_s: float) -> None:
     with pytest.raises(ValueError, match="poll_timeout_s"):
         ProcessorSettings(poll_timeout_s=timeout_s)
+
+
+def test_the_notifier_listens_on_loopback_at_the_port_of_the_contact_point() -> None:
+    settings = NotifierSettings()
+
+    assert (settings.host, settings.port) == ("127.0.0.1", 8089)
+
+
+@pytest.mark.parametrize("port", [-1, 65536])
+def test_notifier_settings_reject_a_port_outside_the_valid_range(port: int) -> None:
+    with pytest.raises(ValueError, match="port"):
+        NotifierSettings(port=port)
+
+
+def test_notifier_settings_require_a_host() -> None:
+    with pytest.raises(ValueError, match="host"):
+        NotifierSettings(host="")

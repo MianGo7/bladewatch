@@ -225,6 +225,27 @@ class ProcessorSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class NotifierSettings:
+    """Where the webhook receiver for the contact point of Grafana listens (A6).
+
+    Attributes:
+        host: Address to listen on. The loopback address keeps the receiver
+            reachable from this machine only.
+        port: TCP port, which the contact point in infra/grafana names.
+    """
+
+    host: str = "127.0.0.1"
+    port: int = 8089
+
+    def __post_init__(self) -> None:
+        """Validates the address and the port."""
+        if not self.host:
+            raise ValueError("NotifierSettings: host must not be empty")
+        if not 0 <= self.port < 65536:
+            raise ValueError(f"NotifierSettings: invalid port {self.port}")
+
+
+@dataclass(frozen=True, slots=True)
 class PlantSettings:
     """The monitored plant: its machines, its sensors, its topics, and Kafka.
 
