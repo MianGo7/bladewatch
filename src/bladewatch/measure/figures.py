@@ -13,7 +13,9 @@ from typing import Any
 import matplotlib as mpl
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.ticker import NullFormatter, ScalarFormatter
+from matplotlib.ticker import FuncFormatter, NullFormatter
+
+from bladewatch.measure.stats import raw_step_passed
 
 _STAGES = (
     "measured to broker",
@@ -53,11 +55,18 @@ def _style() -> None:
     )
 
 
+def _plain_number(value: float, _position: int | None = None) -> str:
+    """Writes a tick as a plain number, without powers and without an offset."""
+    if value >= 1000:
+        return f"{value:,.0f}"
+    return f"{value:g}"
+
+
 def _plain_log(axis: Axes, which: str = "xy") -> None:
     """Writes the ticks of a logarithmic axis as plain numbers, not as powers."""
     for name in which:
         target = axis.xaxis if name == "x" else axis.yaxis
-        target.set_major_formatter(ScalarFormatter())
+        target.set_major_formatter(FuncFormatter(_plain_number))
         target.set_minor_formatter(NullFormatter())
 
 
@@ -129,7 +138,10 @@ def _read(step: Mapping[str, Any], value: str) -> float:
 
 
 def throughput_figure(raw: Mapping[str, Any]) -> Figure:
-    """Draws M2: achieved rate, latency, lag, and the lag over time of the last step.
+    """Draws M2: achieved rate, latency, lag, and the lag over time of a step.
+
+    The lag over time is that of the failing step with the largest load, which is also
+    the step of the profile figure, or of the last step if none failed.
 
     Args:
         raw: The structure of the raw result file of M2.
@@ -204,16 +216,18 @@ def throughput_figure(raw: Mapping[str, Any]) -> Figure:
     _plain_log(lag)
     lag.set_xlabel("Offered readings per second")
     lag.set_ylabel("Largest lag in messages")
-    last = steps[-1]
+    # The same step as in the profile figure, or the last one if none failed.
+    last = failing_step(raw) or steps[-1]
     # The lag is drawn to the end of the load. Afterwards no message arrives, and
     # the backlog drains within the seconds to drain of the table (ADR-0026).
     shown = [s for s in last["samples"] if s[0] <= last["produce_s"]]
     course.plot([s[0] for s in shown], [s[1] - s[2] for s in shown], color="black")
+    course.yaxis.set_major_formatter(FuncFormatter(_plain_number))
     course.set_xlabel("Seconds since the first message")
     course.set_ylabel("Lag in messages")
     course.set_title(
         f"Step of {last['offered_per_s']:,} readings per second, run "
-        f"{last['repetition']}, to the end of the load",
+        f"{last['repetition']},\nto the end of the load",
         loc="left",
         fontsize=9,
     )
@@ -226,9 +240,13 @@ def failing_step(raw: Mapping[str, Any]) -> Mapping[str, Any] | None:
     failed = [
         step
         for step in raw["result"]["steps"]
-        if not step["outcome"]["passed"] and step.get("profile")
+        if not raw_step_passed(step) and step.get("profile")
     ]
-    return max(failed, key=lambda step: step["offered_per_s"], default=None)
+    return max(
+        failed,
+        key=lambda step: (step["offered_per_s"], step["repetition"]),
+        default=None,
+    )
 
 
 def step_profile_figure(raw: Mapping[str, Any]) -> Figure | None:
@@ -320,6 +338,7 @@ def faults_figure(raw: Mapping[str, Any]) -> Figure:
         axis.set_title(f"Processor {mode}", loc="left", fontsize=9)
         axis.set_xlabel("Seconds since the start of the load")
         axis.legend(loc="center right")
+    axes[0].yaxis.set_major_formatter(FuncFormatter(_plain_number))
     axes[0].set_ylabel("Lag in messages")
     figure.tight_layout()
     return figure

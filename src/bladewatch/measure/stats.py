@@ -6,8 +6,9 @@ that the lag implies, and the criteria by which a load step of M2 passes or fail
 tested without the stack. Implements the evaluation of M1 to M3.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -235,6 +236,23 @@ def judge_step(
         generator_limited=delivered < settings.generator_tolerance * offered,
         latency_missed=p95_to_stored_s > settings.latency_target_s,
         lag_growing=growth > settings.lag_growth_fraction * offered_per_s,
+    )
+
+
+def raw_step_passed(step: Mapping[str, Any]) -> bool:
+    """Tells from the raw result of a step whether it passed.
+
+    Args:
+        step: A step of the raw result file of M2, whose outcome holds either the
+            verdict or the three flags that give it.
+    """
+    outcome = step["outcome"]
+    if "passed" in outcome:
+        return bool(outcome["passed"])
+    return not (
+        outcome["generator_limited"]
+        or outcome["latency_missed"]
+        or outcome["lag_growing"]
     )
 
 

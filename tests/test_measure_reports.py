@@ -284,13 +284,36 @@ def test_there_is_no_profile_figure_when_every_step_passed() -> None:
     assert step_profile_figure(raw) is None
 
 
-def test_the_lag_of_the_last_step_is_drawn_to_the_end_of_the_load_only() -> None:
+def test_the_lag_of_the_failing_step_is_drawn_to_the_end_of_the_load_only() -> None:
     raw = throughput_raw()
-    last = raw["result"]["steps"][-1]
-    last["produce_s"] = 1.5
-    last["samples"] = [(0.0, 0, 0), (1.0, 100, 90), (2.0, 200, 200)]
+    failing = raw["result"]["steps"][2]
+    failing["produce_s"] = 1.5
+    failing["samples"] = [(0.0, 0, 0), (1.0, 100, 90), (2.0, 200, 200)]
 
     figure = throughput_figure(raw)
 
     course = figure.axes[3]
     assert list(course.lines[0].get_xdata()) == [0.0, 1.0]
+
+
+def test_the_lag_panel_and_the_profile_figure_show_the_same_step() -> None:
+    raw = throughput_raw()
+    later = _step(500, 2, passed=False)
+    raw["result"]["steps"].append(later)
+
+    figure = throughput_figure(raw)
+    profile = step_profile_figure(raw)
+
+    assert profile is not None
+    assert "run 2" in figure.axes[3].get_title(loc="left")
+    assert "run 2" in profile.texts[0].get_text()
+
+
+def test_a_ramp_without_a_failing_step_draws_the_lag_of_its_last_step() -> None:
+    raw = throughput_raw()
+    for step in raw["result"]["steps"]:
+        step["outcome"]["passed"] = True
+
+    figure = throughput_figure(raw)
+
+    assert "run 2" in figure.axes[3].get_title(loc="left")

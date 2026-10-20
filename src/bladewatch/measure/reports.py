@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 from statistics import median
 from typing import Any
 
+from bladewatch.measure.stats import raw_step_passed
+
 _STAGES = (
     "measured to broker",
     "broker to processor",
@@ -116,7 +118,7 @@ def _partition_share(steps: Sequence[Mapping[str, Any]]) -> str:
 
 def _profile_table(steps: Sequence[Mapping[str, Any]]) -> list[str]:
     failed = [
-        step for step in steps if not step["outcome"]["passed"] and step.get("profile")
+        step for step in steps if not raw_step_passed(step) and step.get("profile")
     ]
     if not failed:
         return []

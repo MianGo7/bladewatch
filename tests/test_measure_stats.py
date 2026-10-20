@@ -10,6 +10,7 @@ from bladewatch.measure.stats import (
     lag_floor_growth_per_s,
     lag_growth_per_s,
     rate_per_s,
+    raw_step_passed,
     summarise,
 )
 
@@ -207,3 +208,17 @@ def test_a_burst_sawtooth_can_mimic_growth_in_a_line_but_not_in_the_floor() -> N
 
 def test_the_floor_of_an_empty_window_does_not_grow() -> None:
     assert lag_floor_growth_per_s([], 0.0, 10.0, 5.0) == 0.0
+
+
+def test_a_raw_step_with_a_verdict_passes_or_fails_by_it() -> None:
+    assert raw_step_passed({"outcome": {"passed": True}})
+    assert not raw_step_passed({"outcome": {"passed": False}})
+
+
+def test_a_raw_step_without_a_verdict_is_judged_by_its_three_flags() -> None:
+    clean = {"generator_limited": False, "latency_missed": False, "lag_growing": False}
+
+    assert raw_step_passed({"outcome": clean})
+    assert not raw_step_passed({"outcome": {**clean, "lag_growing": True}})
+    assert not raw_step_passed({"outcome": {**clean, "latency_missed": True}})
+    assert not raw_step_passed({"outcome": {**clean, "generator_limited": True}})

@@ -261,7 +261,11 @@ def as_json(result: ThroughputResult) -> dict[str, object]:
     steps = []
     for step in result.steps:
         entry = asdict(step)
-        entry["outcome"] = {**asdict(step.outcome), "reason": step.outcome.reason}
+        entry["outcome"] = {
+            **asdict(step.outcome),
+            "passed": step.outcome.passed,
+            "reason": step.outcome.reason,
+        }
         entry["partition_messages"] = {
             str(p): n for p, n in step.partition_messages.items()
         }
