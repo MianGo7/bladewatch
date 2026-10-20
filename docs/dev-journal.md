@@ -631,6 +631,74 @@ drain, at about 23,000 messages per second, which is about the speed of the proc
 is neither an error of the sampling nor a recovery of the processor. The figure is therefore drawn
 to the end of the load, and the drain is reported in the table.
 
+**Observation (B8, measurements on the committed code).** Date 2026-10-20, commit 5a63d01 with a clean
+working tree, which the raw files name without a remark on changes. Hardware, Docker limits, and
+images as above, all runs under `caffeinate` between 19:21 and 20:52, in the order M2, M3, M1, with
+the load of M3 at 2,000 readings per second because that step passed in every run of M2 (A23).
+The code of the runs was that of the first session apart from the stated session timeout of A25,
+which equals the former default.
+
+Two results of M2 hold in both sessions. First, the step of 2,000 readings per second passed in all
+runs of both sessions, with a stored rate of 1,989 to 2,039 per second and a 95th percentile of the
+time to storage of 0.11 to 0.12 seconds. Second, the storage rate saturates at about 24,000 to 25,200
+readings per second: in the clean session the step of 50,000 stored 25,217 and 25,054 per second, and
+in the first session the step of 25,000 stored 24,018 and, when it was run again alone, 24,913 per
+second, which is below the offered rate. Between 5,000 and 25,000 readings per second the verdicts
+differ between the two sessions, and that band is where the limit lies. The details of the clean
+session follow. Every step up to 2,000 readings per second passed in all three runs. The step of 5,000 failed in the first run with a growth of the lag floor
+of 55.8 messages per second against the limit of 50, at a stored rate of 5,022 per second and a 95th
+percentile of 0.214 seconds, and passed in the other two with floors of minus 55.9 and minus 57.0.
+The steps of 10,000 and 25,000 passed in the second and third run, with stored rates of 10,066 and
+10,070 and of 24,918 and 24,842 per second, 95th percentiles of 0.39 and 0.90 to 0.94 seconds, and
+a floor growth of 43.7 and 43.2 against a limit of 250 at 25,000. The step of 50,000 failed in both
+runs: the stored rate was 25,217 and 25,054 per second, the 95th percentile 66.5 and 64.7 seconds,
+the lag reached 1.7 million messages, and the lag needed 74.0 and 72.1 seconds to reach zero after
+the load. The first session had failed the step of 10,000 twice and the step of 25,000 once. Two
+sessions with the same code and the same settings thus gave different verdicts at 5,000, 10,000,
+and 25,000 readings per second, and the cause of the difference is not known; the machine, the
+state of the database after the first session, and other activity are possible but unchecked. The
+width of the band in between is a limit of three runs per session. The profile of the step of 50,000,
+which is that of the third run and the run of the lag panel of the figure, shows the step at the 60th
+second again: the median time from processor to storage rises from 0.006 to 0.007 seconds before the
+60th second to 0.011 to 0.012 afterwards, as in the second run, while the time from broker to
+processor already starts at 0.9 seconds, because the offered load is twice the capacity from the
+beginning.
+
+The log of the database container was read for the two steps of 50,000 readings per second, without
+a change of any database setting, to see whether a checkpoint caused the rise at the 60th second.
+PostgreSQL logged checkpoints that were all started because the write ahead log reached its limit of
+1 GB, one after the other during the whole of both steps. In the second run the load lasted from
+17:45:43 to 17:47:42 UTC and checkpoints started at 17:45:59, 17:46:34, and 17:47:19, which is 17,
+51, and 96 seconds into the load. In the third run the load lasted from 18:05:54 to 18:07:53 and
+checkpoints started at 18:05:59, 18:06:34, and 18:07:11, which is 5, 40, and 77 seconds into the load.
+No checkpoint started at about 60 seconds, and one was running for most of the first 60 seconds as
+well, while the median time from processor to storage stayed at 0.006 to 0.007 seconds. The
+hypothesis that a checkpoint caused the rise was therefore checked and rejected. The log does show
+that the write volume at this rate fills the log of the database every 35 to 45 seconds, so that the
+database is itself heavily loaded in these steps, and its share in the saturation was not examined.
+
+M3 gave the same result as in the first session: in all six runs 240,000 readings were sent, 240,000
+distinct readings were stored, none was missing and none was stored twice, and no batch was received
+again. After a kill the first commit followed the start of the new processor after 14.95 to 14.97
+seconds, which is 44.95 to 44.97 seconds after the kill and equals the stated session timeout, and
+the lag was at most one second of load after 17.97 to 17.99 seconds. After a stop after the batch the
+first commit followed after 2.69 to 2.80 seconds and the lag was at most one second of load after
+3.7 to 4.7 seconds. The largest lag was 88,000 to 89,000 messages after a kill and 64,000 after a
+stop after the batch.
+
+M1 gave, over 21,600 readings in three undisturbed runs, a median of 0.126, a 95th percentile of
+0.218, a 99th percentile of 0.228, and a maximum of 0.557 seconds for the time from measurement to
+storage, and 0.111, 0.219, and 0.229 seconds as median, 95th percentile, and maximum for the six
+alert events. This agrees with the first session within 3 milliseconds at the median and at the
+95th percentile.
+
+The first rendering of the figure of M2 failed, because the raw file stored the three flags of the
+verdict of a step and not the verdict, which the renderer expected. The renderer now reads the flags
+and the writer also stores the verdict, which changes the code after the measurement and not the
+data, and the figures of the three measurements were rendered from the raw files of these runs. The
+first drawing of the figures also had axis labels such as 0.0 for 0.01 and an offset of 1e6 on the
+axes of the lag, which were replaced by plain numbers.
+
 **Next.** B9, the structure and deployment diagrams, the limits, and the finish, which also derives
 the component diagram with the packages `measure` and `bench`. The measurements are repeated on the commit
 of B8 once it exists, so that the raw files name a clean working tree.
