@@ -20,11 +20,16 @@ package "Stream processing" {
 package "Hot storage\nTimescaleDB" {
   database "readings\n(hypertable)" as readings
   database "alerts" as alerts
+  database "machines" as machines
   database "readings_hourly\n(continuous aggregate)" as hourly
 }
 
 package "Data access" {
   component "Grafana\n(dashboard, alert rule,\ncontact point)" as grafana <<prototype>>
+}
+
+package "Notification" {
+  component "Webhook receiver\n(notifier)" as notifier <<prototype>>
 }
 
 package "Archive" {
@@ -43,12 +48,16 @@ producer --> tempTopic : publishes readings\nkey: machine_id
 tempTopic --> processor : consumer group
 processor --> readings : insert, idempotent
 processor --> alerts : insert event,\nidempotent
+processor --> machines : registers machines\nand thresholds at start
 processor --> alertTopic : publishes alerts\nkey: machine_id
 readings --> hourly : aggregates
 readings --> grafana : SQL
 alerts --> grafana : SQL
 hourly --> grafana : SQL
-grafana --> operator : dashboard and\nnotification
+machines --> grafana : SQL
+grafana --> operator : dashboard
+grafana --> notifier : webhook on a\ncritical alert
+notifier --> operator : notification
 alertTopic ..> archiver : second consumer group
 tempTopic ..> archiver : second consumer group
 archiver ..> archive : writes once

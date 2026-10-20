@@ -28,5 +28,9 @@ from `compose.yaml`.
   generated output and are not versioned.
 - The structure diagrams are checked by a test: the arrows of the component
   diagram have to equal the imports of the source files.
+- The module `notifier` is a leaf of the package. It imports only the standard
+  library and `config`, which a test checks, and `cli` is the only module that uses
+  it, so that it appears in the component diagram of B9 below `cli` and above
+  `config`.
 - The state diagram of the alert is checked by a test: its arrows have to equal
   the allowed transitions in `src/bladewatch/rules.py`.

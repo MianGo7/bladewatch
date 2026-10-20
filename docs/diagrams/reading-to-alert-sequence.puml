@@ -9,6 +9,7 @@ participant "Stream processor" as processor
 database "TimescaleDB" as db
 participant "Kafka topic\nmachine-alerts" as alertTopic
 participant "Grafana" as grafana
+participant "Webhook receiver\n(notifier)" as notifier
 actor "Shift operator" as operator
 
 producer -> tempTopic : reading (machine_id, sequence,\nmeasured_at, temperature_c)
@@ -35,6 +36,12 @@ loop at each refresh of the dashboard
   grafana -> db : SQL query for\nreadings and open alerts
   db --> grafana : rows
 end
-grafana -> operator : dashboard shows the alert,\ncontact point sends the notification
+grafana -> operator : dashboard shows the alert
+loop every 10 seconds
+  grafana -> db : evaluate the alert rule on open_alerts
+  db --> grafana : machines with an open critical alert
+end
+grafana -> notifier : webhook (firing)
+notifier -> operator : notification in the terminal
 
 @enduml
