@@ -47,3 +47,62 @@ that the limit of the prototype is explicit.
 | NFR6 | The streaming part absorbs a measured load, and the load at which it misses the latency target or accumulates consumer lag is found with the steps of A9. | done | B8 | Measurement M2 reports offered against achieved readings per second for every step of A9 and the first step at which the stop rule applies. | `src/bladewatch/bench/throughput.py` (measurement M2), `measure/stats.py` (criteria) | Two results hold in both sessions of M2, each of three runs of the ramp with 120 seconds per step. The step of 2,000 readings per second passed in all runs, and the storage rate of one processor saturates at about 24,000 to 25,200 readings per second: the step of 50,000 stored 25,217 and 25,054 per second in the session on the commit 5a63d01 with a 95th percentile of 65 seconds, and the step of 25,000 stored 24,018 and 24,913 per second in a first session on an uncommitted tree. Between 5,000 and 25,000 readings per second the verdicts vary and the limit lies in that band: on the clean commit, 5,000 failed in one run by a growth of the lag floor of 55.8 against a limit of 50 messages per second and passed in two, and 10,000 and 25,000 passed in the two runs that reached them, whereas the first session failed 10,000 in two runs and 25,000 in one (`docs/figures/m2-throughput.md`) |
 | NFR7 | The rules and the sensor model are covered by unit tests that run without Docker. | done | B3, B4 | `uv run pytest -m "not integration"` passes in continuous integration, and the modules `config`, `sensor`, `rules`, and `messages` import neither the Kafka client nor the database driver. | `tests/test_config.py`, `test_sensor.py`, `test_messages.py`, `test_rules.py` | `uv run pytest -m "not integration"` locally; `tests/test_module_boundaries.py` checks that `config`, `sensor`, `rules`, and `messages` import neither the Kafka client nor a database driver |
 | NFR8 | The timestamps `measured_at`, the Kafka log append time, `processed_at`, and `stored_at` are stored with every reading, so that the latency of each stage can be computed from the database. | done | B5 | An integration test reads the four timestamps of a stored reading and checks that they are in the order of the stages. | `src/bladewatch/processor.py`, `storage.py`, `infra/timescaledb/001-readings.sql` | `tests/integration/test_storage.py` and `tests/integration/test_processor.py`: the four timestamps of a stored reading are in the order of the stages |
+
+## Final status
+
+Of the 20 requirements, 19 are done and verified by a test, a measurement, or a check
+of a file, as the last column states, and one, FR12, is deferred. FR12 belongs to the
+architecture and not to the prototype, and ADR-0009 gives the reason. The measured
+requirements, NFR1, NFR2, and NFR6, rest on the runs of 2026-10-20 that are named in
+their rows, and the first two were met in both sessions of those runs.
+
+## Limits of the prototype
+
+The limits below are the ones that the work found or accepted. Each is stated with the
+record in which it is argued, so that the critical reflection can start from them.
+
+- The sensors are simulated, with a constant setpoint and white noise and without a daily
+  rhythm (ADR-0017), and the data collection has no edge gateway, no protocol conversion,
+  and no buffering at the edge (ADR-0004).
+- The stack is one node: one Kafka broker with a replication factor of 1 and one
+  database, so that neither survives its own failure (A8, ADR-0013). It has no
+  authentication between its components, uses development credentials, and binds every
+  port to the loopback interface.
+- One processor runs per group. A second consumer is not supported, because the state of
+  a machine would have to be restored when it moves (ADR-0020), so that the scale-out that
+  the six partitions allow is argued and not measured (A10). The processor stops on a
+  database error and relies on a supervisor that the prototype does not configure.
+- A measured limit of that processor is about 25,000 readings per second, and the verdicts
+  between 5,000 and 25,000 readings per second differed between two sessions with the same
+  code (NFR6). From the 60th second of a stream the rate check costs about ten times as
+  much per reading, because the least squares fit runs over a full window (ADR-0018,
+  ADR-0026). The start of the processor restores the state of every machine from the
+  database, which took 54 seconds for 50,000 streams.
+- Delivery is at least once. The alert topic can hold a repeated event after a failure of
+  the database write, and a consumer recognises the repeat by the identifier and the
+  severity (ADR-0012, ADR-0020). The twelve runs of M3 did not hit the window between the
+  database commit and the commit of the offsets, so that this path is covered by the
+  integration test and not by the measurement.
+- A rule has no timeout for a sensor that falls silent while an alert is open (ADR-0018),
+  and a message that is not valid is skipped, counted in the log, and not stored
+  (ADR-0020).
+- The archive of FR12 is not built, so that nothing can be recomputed beyond the retention
+  of seven days of the topics, and the hot storage deletes raw readings after 90 days
+  (ADR-0009, A11, A12). The hourly aggregate is refreshed every 15 minutes, so that the
+  view lags by up to that time.
+- The integration with the existing data warehouse is a SQL view, and that the existing
+  load can read from PostgreSQL is an assumption to be verified before a pilot (A7,
+  ADR-0010).
+- The notification reaches a local receiver 25.9 to 28.7 seconds after the critical reading
+  and not within the five seconds of A5, which is stated for the alert in the database and
+  on the dashboard. About 20 seconds of it have not been explained (ADR-0023). The dashboard
+  shows an alert at its next refresh of one second (A18).
+- The TimescaleDB licence for compression and continuous aggregates is not an open source
+  licence, which limits the statement that every tool is freely available (ADR-0013).
+  The code is not checked by a static type checker (ADR-0002).
+- The measurements ran on one laptop with the default limits of Docker Desktop and with other
+  activity not controlled, the clocks of all stages are those of one machine, and a run
+  during which the machine slept was discarded and repeated (ADR-0023). The load generator
+  publishes the readings of a tick in a burst, and the streams of a step are one per sensor
+  (ADR-0024, A21). M3 stops the processor and does not fail the broker or the database.
+

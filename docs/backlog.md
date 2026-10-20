@@ -188,7 +188,7 @@ Documents to update: `requirements.md`, `decision-log.md`, `dev-journal.md`.
 
 ## B9: Structure diagrams, limits, and finish
 
-Status: open.
+Status: done.
 
 Scope: the component diagram of the package and the deployment diagram of
 the containers, derived from the code and `compose.yaml`, with a test that

@@ -18,7 +18,27 @@ based on that example. The author is Mian Gohar Ehsan.
 The concept, the requirements, the architecture decisions, and the
 development journal are in `docs/`. The work is organised in the backlog items
 of `docs/backlog.md`, and the status of every requirement is traced in
-`docs/requirements.md`.
+`docs/requirements.md`, which also lists the limits of the prototype. The diagrams
+are the PlantUML sources in `docs/diagrams/`, and the tables and figures of the
+measurements are in `docs/figures/`.
+
+## Running the demonstration from a clean clone
+
+The demonstration needs Docker with Compose and [uv](https://docs.astral.sh/uv/), which
+installs the locked dependencies and the Python version of the project. In a clone of
+the repository:
+
+    uv sync                                          # install the locked dependencies
+    docker compose up -d --wait                      # Kafka, TimescaleDB, Grafana
+    uv run python -m bladewatch scenario --reset     # the demonstration, about 25 minutes
+
+Open `http://localhost:3000/d/bladewatch-overview/bladewatch-machine-monitoring` while the
+scenario runs (user `admin`, password `bladewatch`). All twelve machines are normal for the
+first 100 seconds, then `mould-01` overheats, a warning for the rise appears after about two
+minutes, the critical alert after about six and a half minutes, and the terminal prints the
+notification that Grafana sends. With `--repetitions 1` the demonstration takes about eight
+minutes. It writes the results of the measurement M4 to `results/`. `docker compose down`
+stops the stack and keeps the data, and `docker compose down -v` also removes it.
 
 ## Running the stack
 
@@ -84,6 +104,7 @@ hours, during which the machine should not be used for other work.
 | TimescaleDB | 2.30.2 on PostgreSQL 17 | Timescale License for compression and continuous aggregates, free for self-hosted internal use |
 | Grafana | 13.2.4 | GNU Affero General Public License 3 |
 | Python | 3.13 | Python Software Foundation License |
+| Matplotlib | 3.11.2 | Matplotlib License, based on the Python Software Foundation License |
 | confluent-kafka | 2.16.0 | Apache License 2.0 |
 | NumPy | 2.5.4 | BSD 3-Clause, with permissive licences for parts of the distribution |
 | psycopg | 3.3.6 | GNU Lesser General Public License 3.0 |
@@ -112,6 +133,8 @@ with Compose.
     uv run python -m bladewatch process       # consume, apply the rules, store
     uv run python -m bladewatch notify        # receive and log Grafana notifications
     uv run python -m bladewatch scenario --reset   # the demonstration scenario
+    uv run python -m bladewatch measure latency --reset   # the measurements, see above
+    plantuml -tsvg -o out docs/diagrams/*.puml        # render the diagrams, needs PlantUML
 
 The tests marked `integration` need the running container stack and are run
 with `uv run pytest -m integration`. Continuous integration runs the format

@@ -1193,3 +1193,41 @@ after 15.0 to 15.8 seconds, which is 45.0 to 45.8 seconds after the kill and equ
 setting. A stop in the middle of a batch is a matter of
 chance at a given load, so that the number of the readings that are received again varies
 between runs and can be zero.
+
+
+## ADR-0028: Structure diagrams drawn by hand and checked against the code
+
+Date: 2026-10-20. Status: accepted.
+
+**Context.** The case study needs a component diagram of the package and a deployment
+diagram of the containers, and the conventions of `docs/diagrams/README.md` demand that both
+match the code and `compose.yaml`. A diagram that was drawn from memory and then left alone
+drifts, and the packages `measure` and `bench` and the module `scenario` were added after the
+conceptual diagrams were drawn.
+
+**Decision.** Both diagrams are PlantUML sources that were written by reading the import
+statements of the source files and `compose.yaml`, and a test compares each of them with its
+source. The test of the component diagram parses the imports of every file with the `ast`
+module and requires that the set of arrows equals the set of imports between the modules of
+the package and from them to the libraries, and that every module and library is declared
+as a component. The imports of `config` are not drawn, because every module except `main` and
+`messages` has one and the arrows hid the structure in the first rendering; a second test
+requires exactly that set of importers and that the note in the diagram names the two
+exceptions. The test of the deployment diagram reads `compose.yaml` with regular
+expressions and requires that the containers, the named volumes, the published addresses, the
+images, the bind mounts, and the topics with their partitions are those of the file.
+
+**Alternatives.** Generating the component diagram from the imports was rejected, because a
+generated diagram can never disagree with the code and so cannot show a wrong dependency,
+whereas a drawn diagram with a test fails when either side changes. A tool for the
+dependency graph of Python packages was rejected as a further dependency for one diagram.
+Parsing `compose.yaml` with a YAML library was rejected because the project has none and the
+three patterns that the test needs are plain. Drawing the arrows to `config` was rejected for
+legibility.
+
+**Consequences.** A new module or import fails the test until the diagram is updated, which is
+the intended effect. The test does not check the layout or the labels of the arrows, and it
+does not check that a drawn component is used for what its label says. The deployment
+diagram describes the processes of the host and the arrows between them, which the test
+does not check, and which were read from the code and the configuration.
+

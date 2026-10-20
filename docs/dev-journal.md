@@ -699,6 +699,50 @@ data, and the figures of the three measurements were rendered from the raw files
 first drawing of the figures also had axis labels such as 0.0 for 0.01 and an offset of 1e6 on the
 axes of the lag, which were replaced by plain numbers.
 
-**Next.** B9, the structure and deployment diagrams, the limits, and the finish, which also derives
-the component diagram with the packages `measure` and `bench`. The measurements are repeated on the commit
-of B8 once it exists, so that the raw files name a clean working tree.
+B9, the structure and deployment diagrams, the final status, the limits, and the README. The
+component diagram `package-components.puml` was written by reading the import statements of every
+source file, and the deployment diagram `deployment.puml` by reading `compose.yaml`, the entry
+points, and the configuration. A test file with ten tests compares them with their sources: the
+arrows of the component diagram have to equal the imports between the units of the package and to
+the four libraries, every unit and library has to be declared, the imports of `config` are checked
+as a rule of their own, and the containers, named volumes, published addresses, images, bind mounts,
+and topics with their partitions of the deployment diagram have to equal those of the compose
+file. Removing one arrow from the component diagram made the test fail, and restoring it made it
+pass. Both diagrams were rendered with PlantUML without errors and viewed. The decision is ADR-0028.
+`docs/requirements.md` got a section with the final status, 19 of 20 requirements done and FR12
+deferred, and a section with the limits of the prototype, each with the record in which it is
+argued. The README got a section for the demonstration from a clean clone, the licence of
+Matplotlib in the table of tools, the measurement and diagram commands, and a pointer to the limits.
+
+**Problems (B9).** The first drawing of the component diagram had an arrow from every module to
+`config` and was hard to read. The arrows were left out of the drawing, the rule was stated in a
+note, and a second test checks the rule. The notes of the conventions in `docs/diagrams/README.md`
+said that `cli` is the only module that uses `scenario` and `notifier`, which has not been true
+since `bench` imports `scenario`; they were corrected. The README had no row for Matplotlib, which
+B8 added to the dependencies. The first drawing of the deployment diagram said that `scenario` and `measure` start the three
+processes `produce`, `process`, and `notify`, which the code does not support: `scenario` runs a
+producer, a processor, and a webhook receiver inside its own process, `measure throughput` and
+`measure faults` start only `produce` and `process` as processes, `measure latency` runs the
+scenario code, and nothing starts `notify`. The labels and arrows were corrected, a second webhook
+arrow to `scenario` was added, and a note says that only one receiver can listen on port 8089.
+Furthermore, the check of the README found that the unit tests need
+no tool that a clean clone lacks, but PlantUML is needed to render the diagrams and is not installed
+by `uv`, which the README now says.
+
+**Observation (B9, the check from a clean clone).** The committed repository at the commit da7b36e was
+cloned into an empty directory and run as the README describes: `uv sync --locked` installed the
+locked dependencies, the format check, the static checks, and 456 unit tests passed, the entry points
+listed, `docker compose config` accepted the file, and the scenario ran against the stack that was
+already running, because a second stack would have used the same ports. A run with `--fast` took two
+seconds, and a run of one repetition took 7 minutes and 40 seconds with the same two alert events as
+in every earlier run, the rate warning at 134 seconds and 72.33 degrees Celsius and the critical alert
+at 396 seconds and 95.25 degrees Celsius. The notification of that run arrived about 17 seconds after
+the critical reading, which lies within the range of 2.9 to 28.7 seconds of the earlier runs and
+adds no explanation. The start of the stack from the clone with `docker compose up` was not repeated,
+because it was started and verified in B2 and the stack of this machine uses the same file. The
+README was checked against the committed state and not against the changes of this item, which are
+text only.
+
+**Next.** The prototype is complete. The case study is written outside this repository from the
+documents in `docs/`, starting with the limits in `docs/requirements.md` and the journal for the
+critical reflection.
