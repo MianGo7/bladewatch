@@ -1,0 +1,15 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: operator-webhook
+    receivers:
+      - uid: operator-webhook
+        type: webhook
+        # A6: the notification outside the dashboard is a post to the receiver of
+        # `python -m bladewatch notify`, which runs on the host. A real plant
+        # would use e-mail or a text message here.
+        settings:
+          url: http://host.docker.internal:8089/notify
+          httpMethod: POST
+        disableResolveMessage: false

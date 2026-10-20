@@ -95,6 +95,13 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: bladewatch
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # A18: the dashboard refreshes every second, which is below the default
+      # lower limit of five seconds.
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 1s
+    extra_hosts:
+      # The contact point posts to the receiver on the host. Docker Desktop
+      # defines this name itself, and Linux needs the mapping.
+      - "host.docker.internal:host-gateway"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro

@@ -1,0 +1,63 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: machine-alerts
+    folder: BladeWatch
+    # A19: ten seconds is the shortest evaluation interval that Grafana allows
+    # by default, and it is the largest delay between an alert in the database
+    # and its notification.
+    interval: 10s
+    rules:
+      - uid: critical-machine-alert
+        title: Critical machine alert
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "Machine {{ $labels.machine_id }} has a critical alert"
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: bladewatch-timescaledb
+            model:
+              refId: A
+              datasource:
+                type: grafana-postgresql-datasource
+                uid: bladewatch-timescaledb
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: >-
+                SELECT machine_id, 1 AS value
+                FROM open_alerts
+                WHERE severity = 'critical'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 0
+              datasource:
+                type: __expr__
+                uid: __expr__
