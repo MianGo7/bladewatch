@@ -133,8 +133,10 @@ class FakeStorage:
         history: dict[str, list[tuple[datetime, float]]] | None = None,
         open_alerts: dict[str, OpenAlertRow] | None = None,
         fail: bool = False,
+        already_stored: int = 0,
     ) -> None:
         self._journal = journal
+        self._already_stored = already_stored
         self._history = history or {}
         self._open_alerts = open_alerts or {}
         self._fail = fail
@@ -151,7 +153,8 @@ class FakeStorage:
             raise StorageError("database down")
         self.readings.extend(readings)
         self.alerts.extend(alerts)
-        return BatchResult(len(readings), 0, len(alerts), 0)
+        ignored = min(self._already_stored, len(readings))
+        return BatchResult(len(readings) - ignored, ignored, len(alerts), 0)
 
     def register_machines(self, machines: Sequence[MachineRow]) -> None:
         self._journal.calls.append("register")
@@ -190,10 +193,11 @@ def build(
     undelivered_alerts: int = 0,
     history: dict[str, list[tuple[datetime, float]]] | None = None,
     open_alerts: dict[str, OpenAlertRow] | None = None,
+    already_stored: int = 0,
 ) -> Rig:
     journal = Journal()
     consumer = FakeConsumer(journal, batches)
-    storage = FakeStorage(journal, history, open_alerts, fail_storage)
+    storage = FakeStorage(journal, history, open_alerts, fail_storage, already_stored)
     alerts = FakeAlertClient(journal, undelivered_alerts)
     processor = StreamProcessor(
         plant, consumer, alerts, storage, clock=lambda: PROCESSED_AT
@@ -403,6 +407,20 @@ def test_the_consumer_reads_from_the_start_and_commits_only_by_hand() -> None:
     assert config["broker.address.family"] == "v4"
 
 
+def test_the_session_timeout_of_the_consumer_is_the_stated_45_seconds() -> None:
+    config = consumer_config(default_plant())
+
+    assert config["session.timeout.ms"] == 45000
+
+
+def test_the_session_timeout_follows_the_settings() -> None:
+    plant = dataclasses.replace(
+        SINGLE, processor=ProcessorSettings(session_timeout_ms=12000)
+    )
+
+    assert consumer_config(plant)["session.timeout.ms"] == 12000
+
+
 def test_the_consumer_group_follows_the_settings() -> None:
     plant = dataclasses.replace(
         SINGLE,
@@ -427,3 +445,29 @@ def test_the_machines_are_registered_before_the_rules_are_restored() -> None:
     rig.processor.restore()
 
     assert rig.journal.calls[0] == "register"
+
+
+def test_the_run_logs_a_batch_whose_readings_were_already_stored(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rig = build(
+        [[reading_message(0, 70.0), reading_message(1, 70.0)]], already_stored=2
+    )
+    stops = iter([False, True])
+
+    with caplog.at_level("INFO", logger="bladewatch.processor"):
+        rig.processor.run(lambda: next(stops))
+
+    assert "redelivered batch: 2 of 2 readings were already stored" in caplog.text
+
+
+def test_the_run_logs_nothing_about_redelivery_for_a_new_batch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    rig = build([[reading_message(0, 70.0)]])
+    stops = iter([False, True])
+
+    with caplog.at_level("INFO", logger="bladewatch.processor"):
+        rig.processor.run(lambda: next(stops))
+
+    assert "redelivered" not in caplog.text

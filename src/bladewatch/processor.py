@@ -135,7 +135,7 @@ class BatchStats:
     alerts_inserted: int
 
 
-def consumer_config(plant: PlantSettings) -> dict[str, str | bool]:
+def consumer_config(plant: PlantSettings) -> dict[str, str | bool | int]:
     """Returns the configuration of the Kafka consumer.
 
     ADR-0020: the offsets are committed by hand after the database transaction,
@@ -151,6 +151,9 @@ def consumer_config(plant: PlantSettings) -> dict[str, str | bool]:
         "client.id": "bladewatch-processor",
         "enable.auto.commit": False,
         "auto.offset.reset": "earliest",
+        # A25: the default of the client, stated so that the recovery after a kill
+        # in the measurement M3 depends on a setting and not on an assumption.
+        "session.timeout.ms": plant.processor.session_timeout_ms,
         # localhost resolves to the IPv6 address first, on which the stack does
         # not listen.
         "broker.address.family": "v4",
@@ -241,8 +244,18 @@ class StreamProcessor:
                 messages = self._consumer.consume(
                     settings.batch_size, settings.poll_timeout_s
                 )
-                if messages:
-                    self.process_batch(messages)
+                if not messages:
+                    continue
+                stats = self.process_batch(messages)
+                if stats.readings_ignored:
+                    # A restart after a crash delivers the batch whose offsets
+                    # were not committed once more (ADR-0020), and the measurement
+                    # of the fault tolerance counts these lines.
+                    logger.info(
+                        "redelivered batch: %d of %d readings were already stored",
+                        stats.readings_ignored,
+                        stats.consumed,
+                    )
         finally:
             self._consumer.close()
 
