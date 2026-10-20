@@ -447,9 +447,10 @@ closing event after 20 seconds. These are single observations with the stack at 
 default settings and not measurements; M4 times the alert in the database and on the
 dashboard, and the notification is not part of it.
 
-**Observation (B7, measurement M4).** Date 2026-10-20, working tree of B7 on top of the commit
-58b71f1, which the report names as the commit with uncommitted changes. Hardware: Mac17,8 with
-an Apple M5 Pro, 48 GiB of memory, macOS 27.0.1. Docker Desktop with the Engine 29.8.2 and the
+**Observation (B7, first measurement M4).** Date 2026-10-20, working tree of B7 on top of the
+commit 58b71f1, which the report names as the commit with uncommitted changes. This measurement
+was repeated on the committed code, and the table in `docs/figures/` is that of the repeat.
+Hardware: Mac17,8 with an Apple M5 Pro, 48 GiB of memory, macOS 27.0.1. Docker Desktop with the Engine 29.8.2 and the
 limits of 18 CPUs and 7.746 GiB of memory, which have not been fixed by hand. Images
 apache/kafka 4.3.1, timescale/timescaledb 2.30.2 on PostgreSQL 17, and grafana/grafana
 13.2.4. Load profile: twelve machines with one reading per second, which is 12 readings per
@@ -476,6 +477,40 @@ established and the settings were not changed. The three runs are phase locked t
 evaluation cycle of Grafana because they last equally long, so their agreement says little
 about the spread of the delay. ADR-0022 is marked as corrected by ADR-0023, and A19 no longer
 claims a bound.
+
+**Observation (B7, measurement M4 on the committed code).** Date 2026-10-20, commit 60af417 with
+a clean working tree, which the report names without the remark on uncommitted changes. Hardware
+and limits as above, `caffeinate` for the whole run, three undisturbed runs, no run excluded. A
+first repeat on the same commit was not taken as the record: a figure in the working tree was
+overwritten while its last run was still going, so that its report named a working tree with
+uncommitted changes. It stays in the local results directory, and the measurement was repeated
+with the working tree untouched until the report existed.
+
+The critical alert, in seconds from the measurement of the reading that reached 95 degrees
+Celsius: in the database 0.134, 0.106, and 0.151, with a median of 0.134, a 95th percentile of
+0.149, and a maximum of 0.151; visible to a query of the dashboard 0.202, 0.153, and 0.185, with a
+median of 0.185 and a maximum of 0.202; in the notification 27.161, 26.768, and 26.305. Over all
+5,520 readings of a run the time from measurement to storage had a median of 0.126 to 0.128, a
+95th percentile of 0.218 to 0.221, and a maximum of 0.540 to 0.547 seconds, which agrees with the
+first measurement. The values of a single reading differ more between the measurements than the
+distribution does: the stage from the broker to the processor of the critical reading was 0.082
+to 0.131 seconds here and 0.168 to 0.192 seconds before, while its median over all readings was
+0.109 to 0.110 and 0.105 to 0.107, so that a single reading depends on its position in the
+poll of the processor. The alert events are identical in the three runs.
+
+The notification was decomposed with the state history of Grafana, read through its annotation
+interface after each run and without a change of any alerting setting. The rule evaluated the
+alert as firing 7.135, 6.751, and 6.284 seconds after the measurement, and the notification
+followed that evaluation after 20.026, 20.017, and 20.020 seconds. The first repeat gave 6.397,
+6.319, and 5.839 seconds and 20.016, 20.018, and 20.019 seconds. The wait for the evaluation
+varies with the phase on the grid of 10 seconds, whereas the time from firing to notification is
+20.02 seconds in all six runs, which is twice the group interval of 10 seconds at a group wait of
+0 seconds. That agreement is an observation and not an explanation, and the policy was not
+examined further. The trial values of 5.6 and 2.9 seconds from earlier runs have no history and
+are not explained by this. The screenshots of the dashboard were retaken from the third run: the
+first overview picture of the first repeat had the pointer of the browser in it, and the panels
+were taken at the width that the window allowed, 1100 pixels for the moulds, which gives a chart
+with more axis labels than before, and 900 pixels for the events.
 
 **Next.** B8, the measurements M1 to M3, with the recording of the hardware that was done here.
 The hourly history screenshot is retaken after the runs of B8 and before the next

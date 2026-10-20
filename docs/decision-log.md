@@ -970,15 +970,29 @@ rejected because the refresh is a browser timer that no code of the project can 
 
 **Consequences.** The delay of the notification is longer than ADR-0022 expected. That
 record bounded it by the evaluation interval of the rule plus the interval of the group,
-which is 20 seconds, but the notification followed the critical reading after 5.6 and
-25.2 seconds in the first two runs of a first attempt, after 28.7, 28.2, and 27.7 seconds in
-the three runs of the measurement, and after 2.9 seconds in a later demonstration run. The
-cause of the values above 20 seconds has not been established, and the settings were not
-changed to improve the figure. The three runs of the measurement are also not independent
-of the evaluation cycle of Grafana: every run lasts the same time, so that the critical
-reading falls at nearly the same phase of the cycle, which explains why their notification
-times are close to each other. The spread over the repetitions therefore understates the
-spread of the notification delay. The database and the dashboard query do not depend on
+which is 20 seconds, but the notification followed the critical reading after 25.9 to 28.7
+seconds in every undisturbed run of the measurement, and the settings were not changed to
+improve the figure. The state history of Grafana, which the report reads without changing
+any setting of the alerting, separates the delay into two parts. In the three runs of the
+measurement on the committed code, the rule evaluated the alert as firing 7.135, 6.751, and
+6.284 seconds after the measurement of the critical reading, which is the wait for the next
+evaluation on the grid of 10 seconds and the delay of the query. The notification then
+followed that evaluation after 20.026, 20.017, and 20.020 seconds. A first repeat of the
+measurement on the same commit, which is not the record because a figure of the working
+tree was overwritten during its last run and its report therefore names a working tree with
+uncommitted changes, gave 6.397, 6.319, and 5.839 seconds to the firing state and 20.016,
+20.018, and 20.019 seconds from there to the notification. The second part is thus constant
+to within 10 milliseconds over six runs, whereas the first part depends on the phase of the
+evaluation. The constant of 20.02 seconds is twice the group interval of 10 seconds with a
+group wait of 0 seconds, but the cause is not established by this measurement, and a
+reading of the configuration of the notification policy was not made. The first
+measurement on the uncommitted tree, whose notification times were 28.7, 28.2, and 27.7
+seconds, and the values of 5.6, 25.2, and 2.9 seconds of earlier trial runs have no state
+history and cannot be separated in the same way. The values of 2.9 and 5.6 seconds contradict
+a constant second part and remain unexplained. The three runs of the measurement are also not
+independent of the evaluation cycle of Grafana, because every run lasts the same time and
+the critical reading falls at nearly the same phase of the cycle, so that the spread over the
+repetitions understates the spread of the first part. The database and the dashboard query do not depend on
 that cycle. The query measures when the alert is visible to the dashboard and not
 when the browser draws it. The clocks of the producer, the processor, the database, and
 the poller are the clock of one machine, so that the differences are not affected by a
