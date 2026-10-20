@@ -246,6 +246,70 @@ class NotifierSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class GrafanaSettings:
+    """The connection to the Grafana interface, for measuring the dashboard.
+
+    The defaults are the development credentials of compose.yaml.
+
+    Attributes:
+        base_url: Address of Grafana.
+        user: Name of the user.
+        password: Password of the user.
+        datasource_uid: Identifier of the provisioned data source.
+    """
+
+    base_url: str = "http://localhost:3000"
+    user: str = "admin"
+    password: str = "bladewatch"
+    datasource_uid: str = "bladewatch-timescaledb"
+
+    def __post_init__(self) -> None:
+        """Validates that the address and the data source are set."""
+        if not (self.base_url and self.user and self.datasource_uid):
+            raise ValueError("GrafanaSettings: base_url, user, and datasource_uid")
+
+
+@dataclass(frozen=True, slots=True)
+class ScenarioSettings:
+    """The demonstration scenario for the steering committee (A16, A20).
+
+    Attributes:
+        machine_id: Machine that overheats. Limited to letters, digits, and the
+            characters _ . - because the identifier enters a query.
+        seed: Seed of the simulation. Equal seeds give equal readings.
+        normal_period_s: Time of normal operation before the rise begins, in
+            seconds (A20).
+        rate_c_per_min: Rate of the rise in degrees Celsius per minute (A16).
+        duration_s: Length of the run in seconds (A20).
+        repetitions: Number of runs of the measurement M4 (A20).
+    """
+
+    machine_id: str = "mould-01"
+    seed: int = 1
+    normal_period_s: float = 100.0
+    rate_c_per_min: float = 5.0
+    duration_s: float = 460.0
+    repetitions: int = 3
+
+    def __post_init__(self) -> None:
+        """Validates the machine, the timing, and the number of repetitions."""
+        if not self.machine_id or any(
+            not (c.isalnum() or c in "_.-") or not c.isascii() for c in self.machine_id
+        ):
+            raise ValueError(
+                f"ScenarioSettings: invalid machine_id {self.machine_id!r}"
+            )
+        for name in ("normal_period_s", "rate_c_per_min", "duration_s"):
+            value = getattr(self, name)
+            if not (math.isfinite(value) and value > 0.0):
+                raise ValueError(f"ScenarioSettings: {name} must be positive")
+        if self.duration_s <= self.normal_period_s:
+            raise ValueError("ScenarioSettings: duration_s must exceed normal_period_s")
+        if self.repetitions < 1:
+            raise ValueError("ScenarioSettings: repetitions must be at least 1")
+
+
+@dataclass(frozen=True, slots=True)
 class PlantSettings:
     """The monitored plant: its machines, its sensors, its topics, and Kafka.
 

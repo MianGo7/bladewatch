@@ -8,6 +8,7 @@ from bladewatch.config import (
     MOULD,
     OVEN,
     DatabaseSettings,
+    GrafanaSettings,
     KafkaSettings,
     Machine,
     MachineType,
@@ -15,6 +16,7 @@ from bladewatch.config import (
     PlantSettings,
     ProcessorSettings,
     RuleSettings,
+    ScenarioSettings,
     SensorSettings,
     TopicSettings,
     default_plant,
@@ -220,3 +222,68 @@ def test_notifier_settings_reject_a_port_outside_the_valid_range(port: int) -> N
 def test_notifier_settings_require_a_host() -> None:
     with pytest.raises(ValueError, match="host"):
         NotifierSettings(host="")
+
+
+def test_the_default_scenario_is_the_one_of_assumptions_a16_and_a20() -> None:
+    scenario = ScenarioSettings()
+
+    assert (
+        scenario.machine_id,
+        scenario.normal_period_s,
+        scenario.rate_c_per_min,
+        scenario.duration_s,
+        scenario.repetitions,
+    ) == ("mould-01", 100.0, 5.0, 460.0, 3)
+
+
+def test_the_scenario_lasts_until_after_the_critical_threshold_is_reached() -> None:
+    scenario = ScenarioSettings()
+
+    # From 70 degrees Celsius at 5 degrees Celsius per minute, 25 degrees Celsius
+    # take 300 seconds, so that the critical threshold of 95 is reached at 400.
+    seconds_to_critical = (
+        scenario.normal_period_s + 25.0 / scenario.rate_c_per_min * 60.0
+    )
+    assert scenario.duration_s > seconds_to_critical
+
+
+@pytest.mark.parametrize("machine_id", ["", "mould 01", "a'b", "mould-01;", "mühle"])
+def test_scenario_settings_reject_a_machine_identifier_that_could_enter_a_query(
+    machine_id: str,
+) -> None:
+    with pytest.raises(ValueError, match="machine_id"):
+        ScenarioSettings(machine_id=machine_id)
+
+
+@pytest.mark.parametrize("name", ["normal_period_s", "rate_c_per_min", "duration_s"])
+@pytest.mark.parametrize("value", [0.0, -1.0, math.nan, math.inf])
+def test_scenario_settings_require_positive_finite_timing(
+    name: str, value: float
+) -> None:
+    with pytest.raises(ValueError, match=name):
+        ScenarioSettings(**{name: value})
+
+
+def test_the_scenario_has_to_last_longer_than_its_normal_period() -> None:
+    with pytest.raises(ValueError, match="duration_s"):
+        ScenarioSettings(normal_period_s=100.0, duration_s=100.0)
+
+
+def test_the_scenario_needs_at_least_one_repetition() -> None:
+    with pytest.raises(ValueError, match="repetitions"):
+        ScenarioSettings(repetitions=0)
+
+
+def test_the_default_grafana_settings_are_the_development_credentials() -> None:
+    grafana = GrafanaSettings()
+
+    assert (grafana.base_url, grafana.user, grafana.datasource_uid) == (
+        "http://localhost:3000",
+        "admin",
+        "bladewatch-timescaledb",
+    )
+
+
+def test_grafana_settings_require_an_address() -> None:
+    with pytest.raises(ValueError, match="base_url"):
+        GrafanaSettings(base_url="")
