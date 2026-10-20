@@ -187,7 +187,7 @@ def test_the_open_alerts_panel_shows_the_critical_alert_of_the_processor(
 
     assert len(rows) == 1
     assert (rows[0]["Severity"], rows[0]["Kind"]) == ("critical", "threshold")
-    assert rows[0]["Limit"] == MOULD.critical_c
+    assert rows[0]["Temp. (°C)"] >= MOULD.critical_c
 
 
 def test_the_recent_events_panel_shows_the_raise_and_the_escalation(

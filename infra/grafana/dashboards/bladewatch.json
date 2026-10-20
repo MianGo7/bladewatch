@@ -621,7 +621,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  machine_id AS \"Machine\",\n  severity AS \"Severity\",\n  kind AS \"Kind\",\n  temperature_c AS \"Temperature (°C)\",\n  \"limit\" AS \"Limit\",\n  measured_at AS \"Last event\"\nFROM open_alerts\nORDER BY measured_at DESC"
+          "rawSql": "SELECT\n  machine_id AS \"Machine\",\n  severity AS \"Severity\",\n  kind AS \"Kind\",\n  temperature_c AS \"Temp. (°C)\"\nFROM open_alerts\nORDER BY measured_at DESC"
         }
       ],
       "fieldConfig": {
@@ -682,6 +682,54 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Machine"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Severity"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 85
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Kind"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Temp. (°C)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
           }
         ]
       },
@@ -716,7 +764,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  measured_at AS \"Time\",\n  machine_id AS \"Machine\",\n  status AS \"Status\",\n  severity AS \"Severity\",\n  kind AS \"Kind\",\n  temperature_c AS \"Temperature (°C)\",\n  \"limit\" AS \"Limit\"\nFROM alerts\nWHERE measured_at > now() - interval '24 hours'\nORDER BY measured_at DESC\nLIMIT 50"
+          "rawSql": "SELECT\n  measured_at AS \"Time\",\n  machine_id AS \"Machine\",\n  status AS \"Status\",\n  severity AS \"Severity\",\n  kind AS \"Kind\",\n  temperature_c AS \"Temp. (°C)\",\n  \"limit\" AS \"Limit\"\nFROM alerts\nWHERE measured_at > now() - interval '24 hours'\nORDER BY measured_at DESC\nLIMIT 50"
         }
       ],
       "fieldConfig": {
@@ -775,6 +823,18 @@
                   "mode": "fixed",
                   "fixedColor": "text"
                 }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 190
               }
             ]
           }
