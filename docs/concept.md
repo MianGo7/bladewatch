@@ -169,7 +169,8 @@ are fixed in B1 and a later change is recorded in `decision-log.md`.
 | A16 | Rate of the overheating in the demonstration scenario | 5 degrees Celsius per minute | Assumption, chosen for the demonstration. The rate lies above the limit of 3 degrees Celsius per minute of A15, so that the rate of rise warning is raised before the warning threshold is reached. For a mould that starts at 70 degrees Celsius, the warning threshold of 80 is crossed after 120 seconds and the critical threshold of 95 after 300 seconds |
 | A17 | Batch size and wait of the processor | At most 500 readings per batch, and a partial batch is processed after 0.2 seconds | Assumption. The batch bounds the size of one database transaction and one round trip, and the wait is the largest delay that batching adds to the latency, which is 4 percent of the five seconds of A5. The values are fixed before the measurements and are not changed to improve a result (ADR-0020) |
 | A18 | Refresh interval of the dashboard | One second | Assumption. The dashboard polls the database and does not receive pushed updates, so the refresh interval adds to the time until an alert is visible on it. At one second the worst case adds one second and the duration of the queries to the latency of the alert row, which keeps the dashboard within reach of the five seconds of A5. Grafana has to be told to allow an interval below its default lower limit of five seconds (ADR-0021). Measurement M4 reports the alert on the dashboard separately |
-| A19 | Evaluation and notification timing of the alert rule | The rule is evaluated every 10 seconds with no pending period, a new alert is notified at once, and a further alert of the same group follows within 10 seconds | Assumption. Ten seconds is the shortest evaluation interval that Grafana allows by default, so it is the largest delay between an alert in the database and its notification, and it is not part of the target of A5, which ends at the alert row and the dashboard. A notification of a closing can take up to the evaluation interval plus the group interval (ADR-0022) |
+| A19 | Evaluation and notification timing of the alert rule | The rule is evaluated every 10 seconds with no pending period, a new alert is notified at once, and a further alert of the same group follows within 10 seconds | Assumption. Ten seconds is the shortest evaluation interval that Grafana allows by default, so it was expected to bound the delay between an alert in the database and its notification. Measured delays of 2.9 to 28.7 seconds exceed the 20 seconds of the evaluation interval plus the group interval, and the cause has not been established (ADR-0023). The notification is not part of the target of A5, which ends at the alert row and the dashboard |
+| A20 | Timeline of the demonstration scenario | All machines run normally for 100 seconds, then one mould rises at the rate of A16 until the run ends after 460 seconds, and the measurement M4 is repeated three times | Assumption. The 100 seconds fill the window of 60 seconds of A15 with normal readings, so that the rate warning is a reaction to the rise and not to the start of the run. From 70 degrees Celsius at 5 degrees Celsius per minute the critical threshold of 95 is reached after 400 seconds, which leaves 60 seconds for the notification and the history after it. Three repetitions give a median, a maximum, and a check of the repeatability at a total of about 25 minutes |
 
 The thresholds of A4 are the values at which the processor checks every
 reading. The warning threshold is the lower of the two, and a reading at or
@@ -193,7 +194,7 @@ the alert appears on the dashboard and through the contact point, and the
 history of the machine shows the course of the incident afterwards. The
 scenario is scripted and seeded, so that it runs identically every time and
 the time from crossing the critical threshold to the visible alert can be
-measured. Details are fixed in B7.
+measured. The command `python -m bladewatch scenario --reset` runs it (ADR-0023).
 
 The overheating of the scenario rises at 5 degrees Celsius per minute (A16),
 which is above the limit of 3 degrees Celsius per minute of A15, so that the
@@ -214,6 +215,16 @@ seconds at 75 degrees Celsius, which is still 60 seconds before the threshold.
 | M2 | Throughput | offered against achieved readings per second, consumer lag, the load at which the latency target is missed |
 | M3 | Fault tolerance | readings sent, stored, and duplicated when the processor is stopped and restarted under load, and the time to catch up |
 | M4 | Demonstration scenario | time from crossing the critical threshold to the alert in the database and on the dashboard |
+
+The measurement M4 is defined in the code of the scenario. Its starting point is the time of
+measurement of the reading that reaches the critical threshold. Its end points are the
+storage of the alert event in the database, the first answer of a query to Grafana that
+contains the alert, which is sent every 100 milliseconds against the view that the table of
+open alerts of the dashboard reads, and the arrival of the notification at the receiver. The
+dashboard itself shows the alert at its next refresh, which is at most one second later
+(A18). The path to the database is split into the stages of measurement to broker, broker to
+processor, and processor to database. A run lasts 460 seconds and the measurement is
+repeated three times (A20), each time from an empty state.
 
 ## Points closed in B1
 

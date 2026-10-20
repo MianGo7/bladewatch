@@ -155,7 +155,7 @@ Documents to update: `requirements.md`, `decision-log.md`, `dev-journal.md`.
 
 ## B7: Demonstration scenario for the steering committee
 
-Status: open.
+Status: done.
 
 Scope: the scripted and seeded scenario from `concept.md`: normal operation,
 one machine overheating, warning, critical alert, and the history afterwards.

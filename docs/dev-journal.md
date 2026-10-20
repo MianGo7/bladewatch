@@ -342,6 +342,22 @@ compose file, and the provisioning against the configuration and against each ot
 eleven unit tests cover the notifier, and 12 integration tests cover the dashboard
 and the alerting.
 
+B7, the demonstration scenario and the measurement M4. The module `scenario` and the command
+`python -m bladewatch scenario [--reset]`. The command starts the processor with a consumer
+group of its own, the notification receiver, and a poller of the dashboard, publishes the
+readings of the twelve machines with the overheating of `mould-01` after 100 seconds of
+normal operation, waits until every reading is stored, and computes M4 from the stored rows.
+It refuses to start on a stack that holds data of the scenario and names what `--reset`
+would delete. `storage` gained the scoped row counts, the scoped reset, the alert events with
+the timestamps of their reading, and the latency summary, and `config` the settings of the
+scenario and of Grafana. The tests are 29 unit tests of the pure parts and the report, 6 for
+the rule that detects a suspension of the machine, and 8 integration tests that run the
+scenario in a mode without waiting on isolated topics and machines: the alerts of repeated
+runs are identical, the refusal and the reset behave as described, and the reset touches only
+the machines of the scenario. The measurement was run for real with three repetitions, a
+demonstration run followed for the screenshots, and the results are in
+`docs/figures/m4-demonstration-scenario.md`.
+
 **Decisions.** ADR-0021 fixes the dashboard from views, with the machines registered by
 the processor so that the thresholds keep one source, and ADR-0022 fixes the webhook
 notification and the module `notifier`. The package structure of the architecture is
@@ -355,6 +371,14 @@ surface, which the legend with values and the status table compensate. The scree
 are captured at the full device resolution in four parts per picture with the page frozen,
 joined without scaling, and `docs/figures/README.md` lists the views, their addresses, and
 their sizes. FR6 and FR9 are marked done, and B6 is done.
+
+ADR-0023 records the module, the explicit reset, and the definition of M4, and the new
+assumption A20 fixes the timeline of the scenario. The reset deletes the messages of the two
+topics with the delete records call and the rows of the scenario machines only, so that the
+configuration of the topics and the rows of other machines are not touched. Each run waits
+until its consumer group is stable before the producer starts, because the first readings
+would otherwise carry the start of the processor in their latency. FR11 is marked done and
+NFR1 is partly met until the distribution over all readings under load exists in B8.
 
 **Problems.** The dashboard was first seen rendered when the screenshots were prepared,
 and the view showed layout faults that the tests of the queries and of the file could not
@@ -393,13 +417,67 @@ now cleans that table. Grafana evaluates the alert rule only every 10 seconds, w
 bounds the notification delay from below, and a notification of a closing is slower
 because of the group interval.
 
+A first attempt of the measurement showed a result that no stage of the pipeline explains. Runs
+1 and 2 were normal, with the critical alert in the database 0.2 seconds after its
+measurement, but in run 3 every reading from the middle of the run on lay 99.27 seconds
+between its measurement and its append at the broker, and the processor stage reached 143
+seconds. The run had taken 559 seconds of wall time instead of 460. The cause is a
+suspension of the machine: the producer paces itself with the monotonic clock, which does not
+advance while a Mac sleeps, so that every later reading was produced 99 seconds after the
+wall time that it carries. The power log of the machine was not read, so the sleep is the
+conclusion from the clocks and not a proven fact. The run was not averaged in and was not
+deleted: a rule was added that is independent of any latency, a run is disturbed when the wall
+clock ran two seconds or more longer than the monotonic clock, and a disturbed run is listed in
+the report, left out of the statistics, and repeated. The whole measurement was then repeated
+under `caffeinate`, and the first attempt stays in the local results directory. Disturbed
+runs are a limit of a measurement on a laptop and belong in the reflection.
+
+The window of the browser for the screenshots would not resize in two of the three windows
+that were opened, and it was solved by constraining the width of the page by style for the
+overview and by opening a new window for the panels. The first look at the data showed
+three more layout faults that only an alert could show: the table of open alerts was too
+narrow for its columns, its temperature header was cut, and the time column of the recent
+events cut the timestamp. They were corrected in the dashboard file, the open alerts table
+still cuts a single letter of its header, and the pictures were retaken after the fixes. The
+first run for the pictures was kept only as a trial.
+
 **Observation.** In one run of the command with a critical alert inserted into the
 database, the notification FIRING arrived 12 seconds later and RESOLVED followed the
 closing event after 20 seconds. These are single observations with the stack at its
 default settings and not measurements; M4 times the alert in the database and on the
 dashboard, and the notification is not part of it.
 
-**Next.** B7, the demonstration scenario: a command that runs the producer with the
-overheating of A16, the processor, and the dashboard, and the measurement M4. The
-screenshots of the dashboard at the critical alert, of the history afterwards, and of the
-terminal output of the notification belong there. The continuous integration run on GitHub is still outstanding.
+**Observation (B7, measurement M4).** Date 2026-10-20, working tree of B7 on top of the commit
+58b71f1, which the report names as the commit with uncommitted changes. Hardware: Mac17,8 with
+an Apple M5 Pro, 48 GiB of memory, macOS 27.0.1. Docker Desktop with the Engine 29.8.2 and the
+limits of 18 CPUs and 7.746 GiB of memory, which have not been fixed by hand. Images
+apache/kafka 4.3.1, timescale/timescaledb 2.30.2 on PostgreSQL 17, and grafana/grafana
+13.2.4. Load profile: twelve machines with one reading per second, which is 12 readings per
+second, for 460 seconds per run with the seed 1, three undisturbed runs, each from an empty
+state.
+
+The critical alert, in seconds from the measurement of the reading that reached 95 degrees
+Celsius, in the three runs: in the database 0.186, 0.213, and 0.214, with a median of 0.213, a
+95th percentile of 0.214, and a maximum of 0.214; visible to a query of the dashboard 0.284,
+0.247, and 0.251, with a median of 0.251 and a maximum of 0.284; in the notification 28.7, 28.2,
+and 27.7. The database stages of the critical alert were 0.012 to 0.016 from the measurement to
+the broker, 0.168 to 0.192 from the broker to the processor, and 0.002 to 0.012 from the
+processor to the database. Over all 5,520 readings of a run the time from measurement to
+storage had a median of 0.121 to 0.127, a 95th percentile of 0.213 to 0.222, and a maximum of
+0.537 to 0.567 seconds. The alert events of the three runs are identical: the rate of rise
+warning at 72.33 degrees Celsius 134 seconds after the start and the critical alert at 95.25
+degrees Celsius after 396 seconds. The dashboard itself shows the alert at its next refresh,
+at most one second later.
+
+The notification is the surprising value. It took 27.7 to 28.7 seconds in the three runs, 5.6
+and 25.2 seconds in the first two runs of the first attempt, and 2.9 seconds in the
+demonstration run, which exceeds the 20 seconds that ADR-0022 expected. The cause has not been
+established and the settings were not changed. The three runs are phase locked to the
+evaluation cycle of Grafana because they last equally long, so their agreement says little
+about the spread of the delay. ADR-0022 is marked as corrected by ADR-0023, and A19 no longer
+claims a bound.
+
+**Next.** B8, the measurements M1 to M3, with the recording of the hardware that was done here.
+The hourly history screenshot is retaken after the runs of B8 and before the next
+`scenario --reset`. The continuous integration run on GitHub has succeeded for the earlier
+pushes and is not part of this item.

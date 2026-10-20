@@ -50,6 +50,18 @@ with `uv run python -m bladewatch notify` and writes each notification to the
 terminal; on a Linux host it has to be started with `--host 0.0.0.0` so that the
 container can reach it.
 
+## Demonstration scenario
+
+`uv run python -m bladewatch scenario --reset` runs the demonstration scenario for the
+steering committee with one command. It starts the processor and the notification
+receiver, lets all machines run normally for 100 seconds, then lets `mould-01` overheat
+at 5 degrees Celsius per minute for the rest of 460 seconds, and measures the time from
+the reading that reaches the critical threshold to the alert in the database, on the
+dashboard, and in the notification. It runs three times in a row and writes the results
+of the measurement M4 to `results/`. Without `--reset` the command refuses to start when
+the topics or the tables already hold data of the scenario, and names what `--reset`
+would delete.
+
 ## Tools and licences
 
 | Tool | Version | Licence |
@@ -85,6 +97,7 @@ with Compose.
     uv run python -m bladewatch produce --duration-s 60   # publish readings for a minute
     uv run python -m bladewatch process       # consume, apply the rules, store
     uv run python -m bladewatch notify        # receive and log Grafana notifications
+    uv run python -m bladewatch scenario --reset   # the demonstration scenario
 
 The tests marked `integration` need the running container stack and are run
 with `uv run pytest -m integration`. Continuous integration runs the format

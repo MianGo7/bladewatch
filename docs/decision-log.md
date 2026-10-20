@@ -867,11 +867,15 @@ change made in the browser has to be exported back into it. Grafana converts the
 series of a type into one wide frame, which the tests account for. The layout was
 corrected after the first rendering: the state table had been too short for its twelve
 rows and the legends of the time series too short for four machines, which no test of
-the file or of the queries could show.
+the file or of the queries could show. It was corrected again when the first alert
+appeared: the table of open alerts has neither a column for the time nor one for the
+limit and its four columns have set widths, and the headers of its temperature column and
+of the recent events are shortened, and the time column of the
+recent events is widened, because the text was cut off at the width of the panels.
 
 ## ADR-0022: Webhook notification through a module of the package
 
-Date: 2026-10-20. Status: accepted.
+Date: 2026-10-20. Status: accepted; its statement on the delay of the notification is corrected by ADR-0023.
 
 **Context.** A critical alert has to reach an employee outside the dashboard (FR6),
 and assumption A6 fixes the channel as a contact point of Grafana that posts to a local
@@ -910,3 +914,85 @@ seconds and the resolution followed the closing after 20 seconds; these are sing
 observations. The alert rule reads the view and not the topic, so a notification
 depends on the database and on the processor having stored the alert. The terminal output
 of a received critical notification is a figure for the demonstration of B7.
+
+## ADR-0023: The scenario as a module, an explicit reset, and the definition of M4
+
+Date: 2026-10-20. Status: accepted.
+
+**Context.** The demonstration for the steering committee has to start with one command
+(FR11), run identically on every start, and measure the time from the critical reading
+to the visible alert (M4). It needs the processor, the producer with the overheating,
+the notification receiver, and a measurement, which no existing module may import
+together: the dependency direction of the package keeps `measure` below `producer`,
+`processor`, and `storage`. The stack may already hold the data of earlier runs, which
+would be mixed with the new run on the dashboard.
+
+**Decision.** A new module, `scenario`, starts the processor in a thread with a consumer
+group of its own, the receiver of ADR-0022, and a poller of the dashboard, publishes the
+readings with the overheating of A16 after the normal period of A20, waits until every
+reading is stored, and computes M4 from the stored rows. The module imports `producer`,
+`processor`, `storage`, `notifier`, `sensor`, and `config`, and `cli` is the only module
+that uses it. The command is `python -m bladewatch scenario`. It starts only on an empty
+state. If the topics or the tables hold data of the scenario, the command refuses and
+names what `--reset` would delete. With `--reset` it deletes the messages of the two
+topics with the delete records call of the Kafka administration interface, which keeps
+the configuration of the topics that `kafka-init` created, and the rows of the tables
+`readings`, `alerts`, and `machines` for the machines of the scenario only, and it
+refreshes the hourly aggregate, so that no bucket of the deleted readings remains. More
+than one repetition needs `--reset`, because every run starts from the empty state.
+
+M4 starts at the time of measurement of the first reading that reaches the critical
+threshold and ends at three points: the storage of the alert event in the database, the
+first answer to a query to Grafana that contains the alert, and the arrival of the
+notification. The query reads the view `open_alerts` through the query interface of
+Grafana every 100 milliseconds, and the dashboard itself shows the alert at its next
+refresh, which is at most one second later (A18). The time to the database is split
+into three stages with the timestamps of ADR-0011: measurement to broker, broker to
+processor, and processor to database. The statistics over the runs are the median, the
+95th percentile with linear interpolation, and the maximum. The report also lists the
+distribution of every stage over all readings of every run, and whether the alert events
+of the runs are identical in kind, severity, status, temperature, limit, and time from the
+start. A mode without waiting publishes the same readings as fast as possible and is used
+in the tests, where it makes two runs comparable in seconds; it writes no result.
+
+**Alternatives.** Orchestration inside `measure` was rejected because that module is meant
+to import only `messages` and `config`, and it would import the processor and the storage.
+Orchestration inside `cli` was rejected because the entry point would then hold the
+measurement, which is hard to test without the command line. A reset without a flag was
+rejected because it would delete data silently, and a manual reset with
+`docker compose down -v` was rejected because the scenario would no longer start with one
+command. Deleting and recreating the topics was rejected because it would repeat the
+partition count and the retention of `kafka-init` in the code. Starting the producer
+without waiting for the group of the processor was rejected, because the readings of the
+first seconds would then carry the start of the processor in their latency. Taking the
+end of the path from the time of the refresh of the dashboard instead of a query was
+rejected because the refresh is a browser timer that no code of the project can observe.
+
+**Consequences.** The delay of the notification is longer than ADR-0022 expected. That
+record bounded it by the evaluation interval of the rule plus the interval of the group,
+which is 20 seconds, but the notification followed the critical reading after 5.6 and
+25.2 seconds in the first two runs of a first attempt, after 28.7, 28.2, and 27.7 seconds in
+the three runs of the measurement, and after 2.9 seconds in a later demonstration run. The
+cause of the values above 20 seconds has not been established, and the settings were not
+changed to improve the figure. The three runs of the measurement are also not independent
+of the evaluation cycle of Grafana: every run lasts the same time, so that the critical
+reading falls at nearly the same phase of the cycle, which explains why their notification
+times are close to each other. The spread over the repetitions therefore understates the
+spread of the notification delay. The database and the dashboard query do not depend on
+that cycle. The query measures when the alert is visible to the dashboard and not
+when the browser draws it. The clocks of the producer, the processor, the database, and
+the poller are the clock of one machine, so that the differences are not affected by a
+skew, which would not hold on separate hosts. The poller adds a small load of ten queries
+per second to Grafana and the database during the measurement. A run takes about eight
+minutes and the three repetitions about 25. A run during which the machine sleeps is
+disturbed: the wall clock advances while the monotonic clock that paces the producer does
+not, and every later reading then lies behind its time of measurement by the length of the
+sleep. The first attempt of the measurement had such a run, with a constant lag of 99
+seconds on every later reading, which no stage of the pipeline explains. A run counts as
+disturbed when the two clocks differ by two seconds or more, which does not depend on its
+latencies. A disturbed run is listed in the report, left out of the statistics, and
+repeated, up to two extra times, and the measurement was repeated under `caffeinate`, which
+keeps the machine awake. The reset is scoped to the machines of the
+scenario, so that it does not touch other rows, but it does delete the messages of the
+whole topics, which are shared with any other producer. The results of the measurement go
+to `results/`, which is not versioned, and a summary table is kept in `docs/figures/`.
