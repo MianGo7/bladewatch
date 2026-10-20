@@ -10,7 +10,13 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from types import FrameType
 
-from bladewatch.config import DatabaseSettings, KafkaSettings, default_plant
+from bladewatch.config import (
+    DatabaseSettings,
+    KafkaSettings,
+    NotifierSettings,
+    default_plant,
+)
+from bladewatch.notifier import NotificationServer
 from bladewatch.processor import (
     ProcessorError,
     StreamProcessor,
@@ -85,6 +91,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=DatabaseSettings().port,
         help="port of TimescaleDB",
     )
+
+    notify = commands.add_parser(
+        "notify",
+        help="receive the notifications of the Grafana contact point and log them",
+    )
+    notify.add_argument(
+        "--host",
+        default=NotifierSettings().host,
+        help="address to listen on; the contact point reaches it from the container",
+    )
+    notify.add_argument(
+        "--port",
+        type=int,
+        default=NotifierSettings().port,
+        help="port to listen on; it has to match the contact point in infra/grafana",
+    )
     return parser
 
 
@@ -150,6 +172,22 @@ def _process(bootstrap_servers: str, db_host: str, db_port: int) -> int:
     return 0
 
 
+def _notify(host: str, port: int) -> int:
+    server = NotificationServer(NotifierSettings(host=host, port=port))
+
+    def request_stop(signal_number: int, frame: FrameType | None) -> None:
+        logger.info("stop requested")
+        # shutdown waits for serve_forever, which runs in this thread, so it has
+        # to be called from another one.
+        threading.Thread(target=server.shutdown).start()
+
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
+    logger.info("waiting for notifications on %s:%d%s", host, server.port, "/notify")
+    server.serve_forever()
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Runs the command line and returns the exit status.
 
@@ -170,4 +208,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _process(
             arguments.bootstrap_servers, arguments.db_host, arguments.db_port
         )
+    if arguments.command == "notify":
+        return _notify(arguments.host, arguments.port)
     raise AssertionError(f"unhandled command {arguments.command}")

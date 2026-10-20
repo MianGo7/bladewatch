@@ -45,3 +45,11 @@ def test_the_process_command_takes_a_broker_and_a_database() -> None:
         "db",
         6,
     )
+
+
+def test_the_notify_command_listens_on_loopback_at_the_port_of_the_contact_point() -> (
+    None
+):
+    arguments = build_parser().parse_args(["notify"])
+
+    assert (arguments.host, arguments.port) == ("127.0.0.1", 8089)
