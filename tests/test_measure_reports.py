@@ -317,3 +317,14 @@ def test_a_ramp_without_a_failing_step_draws_the_lag_of_its_last_step() -> None:
     figure = throughput_figure(raw)
 
     assert "run 2" in figure.axes[3].get_title(loc="left")
+
+
+def test_the_stage_table_takes_the_last_run_among_the_failing_steps_of_equal_load() -> (
+    None
+):
+    raw = throughput_raw()
+    raw["result"]["steps"].append(_step(500, 2, passed=False))
+
+    text = throughput_report(raw)
+
+    assert "## Stage times over the step of 500 readings per second, run 2" in text

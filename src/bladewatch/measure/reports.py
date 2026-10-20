@@ -122,7 +122,7 @@ def _profile_table(steps: Sequence[Mapping[str, Any]]) -> list[str]:
     ]
     if not failed:
         return []
-    step = max(failed, key=lambda s: s["offered_per_s"])
+    step = max(failed, key=lambda s: (s["offered_per_s"], s["repetition"]))
     lines = [
         "",
         f"## Stage times over the step of {_count(step['offered_per_s'])} readings per "
