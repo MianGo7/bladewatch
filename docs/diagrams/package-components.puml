@@ -1,0 +1,99 @@
+@startuml package-components
+!include _style.puml
+
+title Components of the Python package bladewatch and their imports
+
+' Every arrow is an import of one module of the package, or of one library, by
+' another module. The imports of config are left out of the drawing, because every
+' module except main and messages has one and they would hide the structure. A test
+' compares the arrows with the imports of the source files, so that the diagram
+' cannot drift from the code.
+
+package "Entry points" {
+  component "__main__" as main
+  component "cli" as cli
+}
+
+package "Runs against the stack" {
+  component "bench\n(package)" as bench
+  component "scenario" as scenario
+}
+
+package "Evaluation" {
+  component "measure\n(package)" as measure
+}
+
+package "Services" {
+  component "producer" as producer
+  component "processor" as processor
+  component "notifier" as notifier
+}
+
+package "Domain" {
+  component "sensor" as sensor
+  component "rules" as rules
+  component "messages" as messages
+}
+
+package "Data access" {
+  component "storage" as storage
+}
+
+package "Settings" {
+  component "config" as config
+}
+
+package "Libraries" {
+  component "confluent-kafka" as confluent_kafka <<library>>
+  component "psycopg" as psycopg <<library>>
+  component "NumPy" as numpy <<library>>
+  component "Matplotlib" as matplotlib <<library>>
+}
+
+main --> cli
+
+cli --> bench
+cli --> measure
+cli --> notifier
+cli --> processor
+cli --> producer
+cli --> scenario
+cli --> storage
+
+bench --> measure
+bench --> scenario
+bench --> storage
+bench --> confluent_kafka
+
+scenario --> notifier
+scenario --> processor
+scenario --> producer
+scenario --> sensor
+scenario --> storage
+scenario --> confluent_kafka
+
+measure --> matplotlib
+measure --> numpy
+
+processor --> messages
+processor --> rules
+processor --> storage
+processor --> confluent_kafka
+
+producer --> messages
+producer --> sensor
+producer --> confluent_kafka
+
+sensor --> numpy
+storage --> psycopg
+
+note right of config
+  Every module except main and messages
+  imports config, and the arrows are not
+  drawn. config and messages import only the
+  standard library. rules, sensor, and
+  messages import neither the Kafka client
+  nor the database driver.
+end note
+
+@enduml

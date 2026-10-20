@@ -1,0 +1,80 @@
+@startuml deployment
+!include _style.puml
+
+title Deployment of the prototype on one developer machine
+
+' Derived from compose.yaml. A test compares the containers, the named volumes,
+' the published ports, the images, and the topics with that file.
+
+actor "Browser of the\nshift operator" as operator
+
+node "Developer machine" as host {
+
+  node "Python 3.13 processes\nstarted with uv run python -m bladewatch" as python {
+    artifact "produce\n(producer)" as producer_process
+    artifact "process\n(processor)" as processor_process
+    artifact "notify\n(webhook receiver)\n127.0.0.1:8089" as notifier_process
+    artifact "scenario\n(runs a producer, a processor, and a\nwebhook receiver in its own process)" as scenario_process
+    artifact "measure throughput and faults\n(start produce and process as processes;\nmeasure latency runs the scenario code)" as bench_process
+  }
+
+  node "Docker Engine, Compose project bladewatch" as docker {
+
+    node "kafka" as kafka <<container>> {
+      artifact "apache/kafka:4.3.1\nKRaft, one node\nHOST 127.0.0.1:9092\nINTERNAL kafka:29092" as kafka_image
+      queue "machine-temperature\n6 partitions\nretention 7 days\nbroker time of arrival" as temperature_topic <<topic>>
+      queue "machine-alerts\n3 partitions\nretention 7 days\nbroker time of arrival" as alerts_topic <<topic>>
+    }
+
+    node "kafka-init" as kafka_init <<container>> {
+      artifact "apache/kafka:4.3.1\none-shot job, exits with 0" as kafka_init_image
+    }
+
+    node "timescaledb" as timescaledb <<container>> {
+      artifact "timescale/timescaledb:2.30.2-pg17\n127.0.0.1:5432" as timescaledb_image
+    }
+
+    node "grafana" as grafana <<container>> {
+      artifact "grafana/grafana:13.2.4\n127.0.0.1:3000" as grafana_image
+    }
+
+    database "kafka-data" as kafka_data <<volume>>
+    database "timescaledb-data" as timescaledb_data <<volume>>
+    database "grafana-data" as grafana_data <<volume>>
+
+    artifact "infra/timescaledb\nschema scripts, read only" as schema_scripts <<bind mount>>
+    artifact "infra/grafana/provisioning\ndata source, dashboard provider,\nalert rule, contact point" as provisioning <<bind mount>>
+    artifact "infra/grafana/dashboards\ndashboard as JSON" as dashboards <<bind mount>>
+  }
+}
+
+kafka_init --> kafka : creates the topics,\nkafka:29092
+producer_process --> kafka : publishes readings,\nlocalhost:9092
+processor_process --> kafka : consumes readings,\npublishes alerts
+processor_process --> timescaledb : inserts readings and alerts,\nlocalhost:5432
+grafana --> timescaledb : SQL,\ntimescaledb:5432
+grafana --> notifier_process : webhook,\nhost.docker.internal:8089
+bench_process ..> processor_process : starts
+bench_process ..> producer_process : starts
+grafana --> scenario_process : webhook, in place of notify,\nhost.docker.internal:8089
+operator --> grafana : http://localhost:3000
+
+kafka --> kafka_data
+timescaledb --> timescaledb_data
+grafana --> grafana_data
+timescaledb --> schema_scripts
+grafana --> provisioning
+grafana --> dashboards
+
+note bottom of python
+  The webhook receiver of notify and that of scenario
+  both listen on 127.0.0.1:8089, so only one of them
+  runs at a time. Neither scenario nor measure starts notify.
+end note
+
+note bottom of docker
+  Every port is bound to the loopback interface.
+  The credentials are development defaults.
+end note
+
+@enduml

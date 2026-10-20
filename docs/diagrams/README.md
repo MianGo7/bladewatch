@@ -13,8 +13,8 @@ from `compose.yaml`.
 | `architecture-overview.puml` | Component diagram of the target architecture with its layers, the chosen tools, and the existing data warehouse | B1 | done |
 | `reading-to-alert-sequence.puml` | Sequence of one reading from the sensor through the broker and the processor to the database, the alert, and the dashboard | B1 | done |
 | `alert-states.puml` | State diagram of the alert of one machine | B4 | done |
-| `package-components.puml` | Component diagram of the Python package, with the imports between modules and libraries | B9 | open |
-| `deployment.puml` | Deployment diagram of the containers, their ports, volumes, and topics | B9 | open |
+| `package-components.puml` | Component diagram of the Python package, with the imports between modules and libraries | B9 | done |
+| `deployment.puml` | Deployment diagram of the containers, their ports, volumes, and topics | B9 | done |
 
 ## Conventions
 
@@ -27,20 +27,22 @@ from `compose.yaml`.
   `plantuml -tsvg -o out docs/diagrams/<file>.puml`. The rendered files are
   generated output and are not versioned.
 - The structure diagrams are checked by a test: the arrows of the component
-  diagram have to equal the imports of the source files.
+  diagram have to equal the imports of the source files, and the containers, volumes,
+  published addresses, images, bind mounts, and topics of the deployment diagram have to
+  equal those of `compose.yaml`. The imports of `config` are not drawn, because every
+  module except `main` and `messages` has one, and a second test checks that rule.
 - The module `notifier` is a leaf of the package. It imports only the standard
-  library and `config`, which a test checks, and `cli` is the only module that uses
-  it, so that it appears in the component diagram of B9 below `cli` and above
-  `config`.
+  library and `config`, which a test checks, and `cli` and `scenario` use it, so that
+  it appears in the component diagram below them.
 - The module `scenario` sits above the modules that it runs. It imports `producer`,
-  `processor`, `storage`, `notifier`, `sensor`, and `config`, and `cli` is the only
-  module that uses it, so that it appears in the component diagram of B9 below `cli`
-  and above these modules.
+  `processor`, `storage`, `notifier`, `sensor`, and `config`, and `cli` and `bench`
+  use it, so that it appears in the component diagram below them and above these
+  modules.
 - The package `bench` sits next to `scenario`. It imports `config`, `storage`,
   `scenario`, and `measure`, and starts the producer and the processor as processes
   through the command line, so that it does not import them. The package `measure`
   imports only `config`, and `cli` is the only module that uses the two, so that they
-  appear in the component diagram of B9 below `cli`, with `bench` above `scenario`,
+  appear in the component diagram below `cli`, with `bench` above `scenario`,
   `storage`, and `measure`.
 - The state diagram of the alert is checked by a test: its arrows have to equal
   the allowed transitions in `src/bladewatch/rules.py`.
