@@ -1,0 +1,894 @@
+{
+  "uid": "bladewatch-overview",
+  "title": "BladeWatch machine monitoring",
+  "description": "Current state, temperature history, and alerts of the twelve machines of RotorWind GmbH.",
+  "tags": [
+    "bladewatch"
+  ],
+  "timezone": "utc",
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "1s",
+  "schemaVersion": 41,
+  "version": 1,
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "1s",
+      "5s",
+      "10s",
+      "30s"
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "machine",
+        "label": "Machine",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "bladewatch-timescaledb"
+        },
+        "query": "SELECT machine_id FROM machines ORDER BY machine_id",
+        "refresh": 1,
+        "sort": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "mould-01",
+          "value": "mould-01"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "State of the machines",
+      "description": "The latest reading of every machine with its thresholds, the age of that reading in seconds, and the severity of its open alert. The state is also written as text.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bladewatch-timescaledb"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 15,
+        "h": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bladewatch-timescaledb"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  machine_id AS \"Machine\",\n  COALESCE(open_alert_severity, 'normal') AS \"State\",\n  temperature_c AS \"Temp. (°C)\",\n  warning_c AS \"Warning (°C)\",\n  critical_c AS \"Critical (°C)\",\n  EXTRACT(EPOCH FROM now() - measured_at)::float8 AS \"Age (s)\"\nFROM machine_status\nORDER BY machine_type, machine_id"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "minWidth": 70
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "normal": {
+                        "text": "normal",
+                        "color": "#0ca30c",
+                        "index": 0
+                      },
+                      "warning": {
+                        "text": "warning",
+                        "color": "#fab219",
+                        "index": 1
+                      },
+                      "critical": {
+                        "text": "critical",
+                        "color": "#d03b3b",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Temp. (°C)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "celsius"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Age (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Moulds",
+      "description": "Temperature of every mould. The lines mark the warning threshold at 80 and the critical threshold at 95 degrees Celsius.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bladewatch-timescaledb"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 8,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bladewatch-timescaledb"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT r.measured_at AS time, r.machine_id AS metric, r.temperature_c AS value\nFROM readings AS r\nJOIN machines AS m ON m.machine_id = r.machine_id\nWHERE $__timeFilter(r.measured_at) AND m.machine_type = 'mould'\nORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "showPoints": "never",
+            "fillOpacity": 0,
+            "spanNulls": false,
+            "axisLabel": "Temperature (°C)",
+            "thresholdsStyle": {
+              "mode": "line"
+            },
+            "axisSoftMin": 50.0,
+            "axisSoftMax": 100.0
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#fab219",
+                "value": 80.0
+              },
+              {
+                "color": "#d03b3b",
+                "value": 95.0
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-01$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#2a78d6"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-02$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#eb6834"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-03$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#1baf7a"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-04$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#eda100"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Ovens",
+      "description": "Temperature of every oven. The lines mark the warning threshold at 110 and the critical threshold at 120 degrees Celsius.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bladewatch-timescaledb"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 14,
+        "w": 8,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bladewatch-timescaledb"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT r.measured_at AS time, r.machine_id AS metric, r.temperature_c AS value\nFROM readings AS r\nJOIN machines AS m ON m.machine_id = r.machine_id\nWHERE $__timeFilter(r.measured_at) AND m.machine_type = 'oven'\nORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "showPoints": "never",
+            "fillOpacity": 0,
+            "spanNulls": false,
+            "axisLabel": "Temperature (°C)",
+            "thresholdsStyle": {
+              "mode": "line"
+            },
+            "axisSoftMin": 80.0,
+            "axisSoftMax": 125.0
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#fab219",
+                "value": 110.0
+              },
+              {
+                "color": "#d03b3b",
+                "value": 120.0
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-01$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#2a78d6"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-02$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#eb6834"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-03$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#1baf7a"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-04$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#eda100"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Grinding machines",
+      "description": "Temperature of every grinder. The lines mark the warning threshold at 60 and the critical threshold at 75 degrees Celsius.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bladewatch-timescaledb"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 14,
+        "w": 8,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bladewatch-timescaledb"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT r.measured_at AS time, r.machine_id AS metric, r.temperature_c AS value\nFROM readings AS r\nJOIN machines AS m ON m.machine_id = r.machine_id\nWHERE $__timeFilter(r.measured_at) AND m.machine_type = 'grinder'\nORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "showPoints": "never",
+            "fillOpacity": 0,
+            "spanNulls": false,
+            "axisLabel": "Temperature (°C)",
+            "thresholdsStyle": {
+              "mode": "line"
+            },
+            "axisSoftMin": 25.0,
+            "axisSoftMax": 80.0
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#fab219",
+                "value": 60.0
+              },
+              {
+                "color": "#d03b3b",
+                "value": 75.0
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-01$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#2a78d6"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-02$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#eb6834"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-03$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#1baf7a"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*-04$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#eda100"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Open alerts",
+      "description": "Alerts without a closing event. The severity is the highest one that the alert has reached.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bladewatch-timescaledb"
+      },
+      "gridPos": {
+        "x": 15,
+        "y": 0,
+        "w": 9,
+        "h": 14
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bladewatch-timescaledb"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  machine_id AS \"Machine\",\n  severity AS \"Severity\",\n  kind AS \"Kind\",\n  temperature_c AS \"Temperature (°C)\",\n  \"limit\" AS \"Limit\",\n  measured_at AS \"Last event\"\nFROM open_alerts\nORDER BY measured_at DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "minWidth": 70
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Severity"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "normal": {
+                        "text": "normal",
+                        "color": "#0ca30c",
+                        "index": 0
+                      },
+                      "warning": {
+                        "text": "warning",
+                        "color": "#fab219",
+                        "index": 1
+                      },
+                      "critical": {
+                        "text": "critical",
+                        "color": "#d03b3b",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Recent alert events",
+      "description": "The raises, escalations, and closings of the last 24 hours, newest first.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bladewatch-timescaledb"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bladewatch-timescaledb"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  measured_at AS \"Time\",\n  machine_id AS \"Machine\",\n  status AS \"Status\",\n  severity AS \"Severity\",\n  kind AS \"Kind\",\n  temperature_c AS \"Temperature (°C)\",\n  \"limit\" AS \"Limit\"\nFROM alerts\nWHERE measured_at > now() - interval '24 hours'\nORDER BY measured_at DESC\nLIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false,
+            "minWidth": 70
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Severity"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "normal": {
+                        "text": "normal",
+                        "color": "#0ca30c",
+                        "index": 0
+                      },
+                      "warning": {
+                        "text": "warning",
+                        "color": "#fab219",
+                        "index": 1
+                      },
+                      "critical": {
+                        "text": "critical",
+                        "color": "#d03b3b",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Hourly history of $machine",
+      "description": "Minimum, mean, and maximum per hour of the selected machine, read from the continuous aggregate readings_hourly over the last 24 hours.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bladewatch-timescaledb"
+      },
+      "timeFrom": "24h",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bladewatch-timescaledb"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  bucket AS time,\n  min_temperature_c AS \"minimum\",\n  mean_temperature_c AS \"mean\",\n  max_temperature_c AS \"maximum\"\nFROM readings_hourly\nWHERE machine_id = '$machine' AND $__timeFilter(bucket)\nORDER BY bucket"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 1,
+          "custom": {
+            "lineWidth": 2,
+            "showPoints": "always",
+            "pointSize": 6,
+            "fillOpacity": 0,
+            "axisLabel": "Temperature (°C)"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "minimum"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#1baf7a"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mean"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#2a78d6"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "maximum"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#eb6834"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    }
+  ]
+}
