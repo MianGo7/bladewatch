@@ -26,9 +26,6 @@ package "Hot storage\nTimescaleDB" {
 
 package "Data access" {
   component "Grafana\n(dashboard, alert rule,\ncontact point)" as grafana <<prototype>>
-}
-
-package "Notification" {
   component "Webhook receiver\n(notifier)" as notifier <<prototype>>
 }
 
